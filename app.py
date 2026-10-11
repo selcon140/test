@@ -71,14 +71,14 @@ def fetch_aggregated_data() -> pd.DataFrame:
     return df
 
 # -----------------------------------------------------------------------------
-# 端末別レスポンシブ・スタイルシート（Responsive CSS）
+# スタイルシート設定（Mobile-First CSS Injection）
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="演習ダッシュボード", layout="wide")
+st.set_page_config(page_title="演習ダッシュボード", layout="centered")
 init_db()
 
 st.markdown("""
 <style>
-    /* 基本フォント・リセット */
+    /* 基本設定（モバイルファースト） */
     .stApp {
         background-color: #F8F9FA;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif;
@@ -86,45 +86,59 @@ st.markdown("""
         -webkit-text-size-adjust: 100%;
     }
 
-    /* 共通ヘッダー */
+    /* 画面コンテナの余白をスマホに最適化 */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 5rem !important;
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+        max-width: 860px !important;
+        width: 100% !important;
+    }
+
+    /* ヘッダー */
     .nintendo-header {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 20px;
+        gap: 10px;
+        margin-bottom: 16px;
         padding-bottom: 12px;
-        border-bottom: 2px solid #EAEAEA;
+        border-bottom: 2px solid #EBEBEB;
     }
     .nintendo-badge {
         background-color: #E60012;
         color: #FFFFFF;
         font-size: 13px;
         font-weight: 800;
-        padding: 5px 12px;
-        border-radius: 8px;
+        letter-spacing: 0.5px;
+        padding: 4px 10px;
+        border-radius: 6px;
         text-transform: uppercase;
     }
     .nintendo-title {
-        font-size: 24px;
+        font-size: 22px;
         font-weight: 800;
+        letter-spacing: -0.5px;
         color: #1A1A1A;
     }
 
-    /* タブスタイル */
+    /* タブ切り替え（タップしやすい高さ・横スクロール対応） */
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
         border-bottom: 2px solid #E5E7EB;
-        gap: 16px;
+        gap: 8px;
         padding-left: 0;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: transparent !important;
         border: none !important;
-        padding: 12px 18px !important;
+        padding: 12px 14px !important;
         font-size: 15px !important;
         font-weight: 700;
         color: #71717A;
+        white-space: nowrap;
     }
     .stTabs [aria-selected="true"] {
         color: #1A1A1A !important;
@@ -140,199 +154,83 @@ st.markdown("""
         border-radius: 3px 3px 0 0;
     }
 
-    /* ボタン（Nintendo Red） */
-    .stButton > button {
-        background-color: #E60012;
+    /* サマリーカード: デフォルト（スマホ）で大きく見やすい3列 */
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 18px;
+    }
+    .summary-card {
+        background: #FFFFFF;
+        border-radius: 14px;
+        padding: 14px 8px;
+        border: 1px solid #EAEAEA;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
+        text-align: center;
+    }
+    .summary-card.primary {
+        background: linear-gradient(135deg, #E60012 0%, #BA000F 100%);
         color: #FFFFFF;
         border: none;
-        border-radius: 14px;
+    }
+    .summary-label {
+        font-size: 11px;
         font-weight: 700;
-        font-size: 16px !important;
-        min-height: 52px !important;
-        padding: 12px 24px;
-        width: 100%;
-        box-shadow: 0 4px 14px rgba(230, 0, 18, 0.25);
-        transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+        color: #8E8E93;
+        margin-bottom: 4px;
     }
-    .stButton > button:hover {
-        background-color: #CC0010;
-        color: #FFFFFF;
+    .summary-card.primary .summary-label {
+        color: rgba(255, 255, 255, 0.9);
     }
-
-    /* フォーム部品 */
-    div[data-baseweb="select"] > div, input, textarea {
-        min-height: 50px !important;
-        font-size: 16px !important;
-        border-radius: 12px !important;
-        border-color: #E5E7EB !important;
+    .summary-value {
+        font-size: 20px;
+        font-weight: 800;
     }
 
-    /* =========================================================================
-       ★ PC向けレイアウト設定（画面幅 769px 以上）
-       ========================================================================= */
-    @media (min-width: 769px) {
-        .mobile-only {
-            display: none !important;
-        }
-        .pc-only {
-            display: block !important;
-        }
-
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 4rem;
-            max-width: 1100px;
-        }
-
-        /* サマリーカード: 横並び3カラム */
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-        .summary-card {
-            background: #FFFFFF;
-            border-radius: 16px;
-            padding: 20px 24px;
-            border: 1px solid #EAEAEA;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
-            transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1);
-        }
-        .summary-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px -4px rgba(0, 0, 0, 0.08);
-        }
-        .summary-card.primary {
-            background: linear-gradient(135deg, #E60012 0%, #BA000F 100%);
-            color: #FFFFFF;
-            border: none;
-        }
-        .summary-label {
-            font-size: 13px;
-            font-weight: 700;
-            color: #8E8E93;
-            margin-bottom: 6px;
-        }
-        .summary-card.primary .summary-label {
-            color: rgba(255, 255, 255, 0.85);
-        }
-        .summary-value {
-            font-size: 28px;
-            font-weight: 800;
-        }
-
-        /* 問題一覧: 3カラムのワイドカードグリッド */
+    /* 問題カードグリッド: モバイルファースト
+       スマホ（幅狭）: 1カラム（横幅いっぱい）
+       タブレット・PC（幅広）: 自動で2〜3カラム */
+    .cards-grid {
+        display: grid;
+        grid-template-columns: 1fr; /* スマホでは確実に1列！ */
+        gap: 14px;
+        margin-top: 14px;
+    }
+    @media (min-width: 680px) {
         .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-            margin-top: 16px;
+            grid-template-columns: repeat(2, 1fr); /* iPad・中画面で2列 */
         }
-        .nintendo-card {
-            background: #FFFFFF;
-            border-radius: 18px;
-            padding: 20px;
-            border: 1px solid #ECECEC;
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.03);
-            transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1),
-                        box-shadow 0.28s cubic-bezier(0.25, 1, 0.5, 1);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+    }
+    @media (min-width: 950px) {
+        .cards-grid {
+            grid-template-columns: repeat(3, 1fr); /* PC大画面で3列 */
         }
+    }
+
+    /* 個別問題カード */
+    .nintendo-card {
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 18px 20px;
+        border: 1px solid #ECECEC;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.03);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    .nintendo-card:active {
+        transform: scale(0.985);
+    }
+    @media (hover: hover) and (pointer: fine) {
         .nintendo-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 16px 32px -6px rgba(0, 0, 0, 0.12);
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -4px rgba(0, 0, 0, 0.10);
             border-color: #D6D6D6;
         }
-        .card-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin-bottom: 14px;
-            line-height: 1.4;
-        }
     }
 
-    /* =========================================================================
-       ★ スマホ向けレイアウト設定（画面幅 768px 以下）
-       ========================================================================= */
-    @media (max-width: 768px) {
-        .pc-only {
-            display: none !important;
-        }
-        .mobile-only {
-            display: block !important;
-        }
-
-        .block-container {
-            padding-left: 10px !important;
-            padding-right: 10px !important;
-            padding-top: 0.8rem !important;
-        }
-
-        /* サマリーカード: スマホ向けコンパクト横3分割 */
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-        .summary-card {
-            background: #FFFFFF;
-            border-radius: 12px;
-            padding: 12px 6px;
-            border: 1px solid #EAEAEA;
-            text-align: center;
-        }
-        .summary-card.primary {
-            background: linear-gradient(135deg, #E60012 0%, #BA000F 100%);
-            color: #FFFFFF;
-            border: none;
-        }
-        .summary-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: #8E8E93;
-            margin-bottom: 2px;
-        }
-        .summary-card.primary .summary-label {
-            color: rgba(255, 255, 255, 0.9);
-        }
-        .summary-value {
-            font-size: 18px;
-            font-weight: 800;
-        }
-
-        /* 問題一覧: 1カラム・親指操作に特化した大型縦積みカード */
-        .cards-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
-            margin-top: 12px;
-        }
-        .nintendo-card {
-            background: #FFFFFF;
-            border-radius: 16px;
-            padding: 16px 18px;
-            border: 1px solid #ECECEC;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-        .nintendo-card:active {
-            transform: scale(0.985);
-        }
-        .card-title {
-            font-size: 18px;
-            font-weight: 800;
-            margin-bottom: 16px;
-            line-height: 1.45;
-        }
-    }
-
-    /* 共通パーツ（プログレスバー、バッジ等） */
     .card-top {
         display: flex;
         align-items: center;
@@ -342,29 +240,38 @@ st.markdown("""
     .tag-subject {
         background-color: #F1F2F5;
         color: #27272A;
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 700;
-        padding: 3px 8px;
-        border-radius: 6px;
+        padding: 4px 10px;
+        border-radius: 8px;
     }
     .tag-unit {
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 600;
         color: #71717A;
     }
+    .card-title {
+        font-size: 19px; /* スマホでパッと読める大見出し */
+        font-weight: 800;
+        color: #1A1A1A;
+        line-height: 1.4;
+        margin-bottom: 16px;
+    }
+
+    /* 正答率バー（太く視認性向上） */
     .progress-wrapper {
-        margin-bottom: 12px;
+        margin-bottom: 14px;
     }
     .progress-label-row {
         display: flex;
         justify-content: space-between;
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 700;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
     }
     .progress-bar-bg {
         width: 100%;
-        height: 9px;
+        height: 10px;
         background-color: #EAEAEA;
         border-radius: 6px;
         overflow: hidden;
@@ -379,31 +286,62 @@ st.markdown("""
     .fill-red { background-color: #EF4444; }
     .fill-gray { background-color: #D1D5DB; }
 
+    /* カード下部ステータス */
     .card-footer {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding-top: 12px;
         border-top: 1px solid #F3F4F6;
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 600;
         color: #71717A;
     }
     .alert-pill {
         background-color: #FEE2E2;
         color: #DC2626;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 700;
-        padding: 3px 8px;
+        padding: 4px 10px;
         border-radius: 12px;
     }
     .safe-pill {
         background-color: #E0F2FE;
         color: #0284C7;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 700;
-        padding: 3px 8px;
+        padding: 4px 10px;
         border-radius: 12px;
+    }
+
+    /* ボタン（Nintendo Red & 52px高の確実なタッチターゲット） */
+    .stButton > button {
+        background-color: #E60012;
+        color: #FFFFFF;
+        border: none;
+        border-radius: 14px;
+        font-weight: 700;
+        font-size: 16px !important;
+        min-height: 52px !important;
+        padding: 12px 24px;
+        width: 100%;
+        box-shadow: 0 4px 14px rgba(230, 0, 18, 0.25);
+        transition: all 0.2s ease;
+    }
+    .stButton > button:hover {
+        background-color: #CC0010;
+        color: #FFFFFF;
+    }
+
+    /* フォーム入力要素（iOSの自動拡大ズーム防止のため16px以上を維持） */
+    div[data-baseweb="select"] > div, input, textarea {
+        min-height: 50px !important;
+        font-size: 16px !important;
+        border-radius: 12px !important;
+        border-color: #E5E7EB !important;
+    }
+    div[data-testid="stRadio"] label {
+        font-size: 15px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -434,7 +372,7 @@ with tab_catalog:
         avg_acc = data["accuracy"].dropna().mean()
         avg_str = f"{avg_acc:.1f}%" if pd.notna(avg_acc) else "-"
 
-        # サマリーカード（PC/スマホでCSSが自動で幅とサイズを調整）
+        # サマリーカード
         summary_html = f"""
         <div class="summary-grid">
             <div class="summary-card primary">
@@ -452,13 +390,6 @@ with tab_catalog:
         </div>
         """
         st.markdown("\n".join(line.strip() for line in summary_html.splitlines()), unsafe_allow_html=True)
-
-        # PC向けヒントバナー（スマホでは自動非表示）
-        st.markdown("""
-        <div class="pc-only" style="background:#FFFFFF; border:1px solid #EBEBEB; border-radius:12px; padding:10px 16px; margin-bottom:14px; font-size:13px; color:#71717A;">
-            💡 <strong>PC表示モード:</strong> 広い画面を活かした3列グリッドで全体を見渡せます。カードにカーソルを合わせると詳細が浮き上がります。
-        </div>
-        """, unsafe_allow_html=True)
 
         # 絞り込み & 並び替え
         col_f1, col_f2 = st.columns(2)
@@ -486,7 +417,7 @@ with tab_catalog:
         elif sort_metric == "演習回数が少ない順":
             filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
-        # カードグリッド生成（HTML）
+        # カードグリッド生成
         cards_html = '<div class="cards-grid">\n'
         for _, r in filtered.iterrows():
             title_s = html.escape(str(r["title"]))
@@ -587,7 +518,7 @@ with tab_entry:
         with col_res:
             result_str = st.radio("結果判定", ["正解 (◯)", "不正解 (✕)"], horizontal=True)
 
-        memo_val = st.text_input("演習メモ（公式・定理の条件やミスの原因）", placeholder="ビオ・サバールの微小要素の向きを誤認した、など")
+        memo_val = st.text_input("演習メモ（公式・定理の条件やミスの原因）", placeholder="解法の要点やミスの理由")
 
         st.write("")
         if st.button("この記録を保存する"):
@@ -604,7 +535,7 @@ with tab_entry:
 # -----------------------------------------------------------------------------
 # タブ 3: マスタ・履歴管理
 # -----------------------------------------------------------------------------
-with tab_manage:
+with tab_control:
     sub_action = st.radio(
         "操作を選択",
         ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
@@ -626,8 +557,8 @@ with tab_manage:
         else:
             new_subject = st.text_input("新規科目名")
 
-        new_unit = st.text_input("単元名（例: ビオ・サバールの法則）")
-        new_title = st.text_input("問題名（例: 有限長直線電流の磁界）")
+        new_unit = st.text_input("単元名（例: ガウスの法則）")
+        new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
 
         st.write("")
         if st.button("問題をカタログに追加"):
