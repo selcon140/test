@@ -86,9 +86,14 @@ st.markdown("""
         -webkit-text-size-adjust: 100%;
     }
 
-    /* コンテナ余白（スマホで全幅を活用） */
+    /* Streamlit標準ヘッダーバーの透過処理 */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+    }
+
+    /* コンテナ余白（ヘッダーバーとの被りを防ぐため上部余白を4.5remに拡大） */
     .block-container {
-        padding-top: 1rem !important;
+        padding-top: 4.5rem !important;
         padding-bottom: 5rem !important;
         padding-left: 14px !important;
         padding-right: 14px !important;
@@ -404,6 +409,7 @@ with tab_catalog:
         elif sort_metric == "演習回数が少ない順":
             filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
+        # カードグリッド生成
         cards_html = '<div class="cards-grid">\n'
         for _, r in filtered.iterrows():
             title_s = html.escape(str(r["title"]))
@@ -521,7 +527,7 @@ with tab_entry:
 # -----------------------------------------------------------------------------
 # タブ 3: マスタ・履歴管理
 # -----------------------------------------------------------------------------
-with tab_manage:  # ★ 変数名を修正（tab_control -> tab_manage）
+with tab_manage:
     sub_action = st.radio(
         "操作を選択",
         ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
