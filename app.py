@@ -1,58 +1,80 @@
-import sqlite3
 from datetime import date, datetime
 import html
 import pandas as pd
 import streamlit as st
-
-DB_NAME = "study_tracker.db"
+from streamlit_gsheets import GSheetsConnection
 
 # -----------------------------------------------------------------------------
-# データベース制御関数（Database Operations）
+# Google スプレッドシート連携・データ操作関数（Spreadsheet Operations）
 # -----------------------------------------------------------------------------
 def get_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    """Google Sheets への接続コネクション（connection）を取得します。"""
+    return st.connection("gsheets", type=GSheetsConnection)
 
-def init_db():
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS problems (
-                problem_id TEXT PRIMARY KEY,
-                subject TEXT NOT NULL,
-                unit TEXT NOT NULL,
-                title TEXT NOT NULL
-            );
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS attempts (
-                attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                problem_id TEXT NOT NULL,
-                attempt_date DATE NOT NULL,
-                is_correct INTEGER NOT NULL CHECK (is_correct IN (0, 1)),
-                memo TEXT,
-                FOREIGN KEY (problem_id) REFERENCES problems(problem_id) ON DELETE CASCADE
-            );
-        """)
-        conn.commit()
+def get_problems_df() -> pd.DataFrame:
+    """問題マスタ（problems シート）を取得します。"""
+    conn = get_connection()
+    df = conn.read(worksheet="problems", ttl=0)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["problem_id", "subject", "unit", "title"])
+    df = df.dropna(how="all")
+    for col in ["problem_id", "subject", "unit", "title"]:
+        if col not in df.columns:
+            df[col] = ""
+    df = df.astype(str)
+    df = df[df["problem_id"].str.strip() != ""]
+    return df
+
+def get_attempts_df() -> pd.DataFrame:
+    """演習履歴（attempts シート）を取得します。"""
+    conn = get_connection()
+    df = conn.read(worksheet="attempts", ttl=0)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["attempt_id", "problem_id", "attempt_date", "is_correct", "memo"])
+    df = df.dropna(how="all")
+    for col in ["attempt_id", "problem_id", "attempt_date", "is_correct", "memo"]:
+        if col not in df.columns:
+            df[col] = ""
+    df = df[df["attempt_id"].astype(str).str.strip() != ""]
+    return df
+
+def save_problems_df(df: pd.DataFrame):
+    """問題マスタ（problems シート）を更新保存します。"""
+    conn = get_connection()
+    conn.update(worksheet="problems", data=df)
+
+def save_attempts_df(df: pd.DataFrame):
+    """演習履歴（attempts シート）を更新保存します。"""
+    conn = get_connection()
+    conn.update(worksheet="attempts", data=df)
 
 def fetch_aggregated_data() -> pd.DataFrame:
-    query = """
-        SELECT
-            p.problem_id AS problem_id,
-            p.subject AS subject,
-            p.unit AS unit,
-            p.title AS title,
-            COUNT(a.attempt_id) AS total_attempts,
-            SUM(CASE WHEN a.is_correct = 1 THEN 1 ELSE 0 END) AS correct_count,
-            MAX(a.attempt_date) AS last_date
-        FROM problems p
-        LEFT JOIN attempts a ON p.problem_id = a.problem_id
-        GROUP BY p.problem_id;
-    """
-    with get_connection() as conn:
-        df = pd.read_sql_query(query, conn)
+    """スプレッドシートからデータを取得し、集計（aggregation）したデータフレームを生成します。"""
+    problems_df = get_problems_df()
+    attempts_df = get_attempts_df()
+
+    if problems_df.empty:
+        return pd.DataFrame()
+
+    if attempts_df.empty:
+        df = problems_df.copy()
+        df["total_attempts"] = 0
+        df["correct_count"] = 0
+        df["last_date"] = None
+    else:
+        attempts_clean = attempts_df.dropna(subset=["problem_id"]).copy()
+        attempts_clean["is_correct"] = pd.to_numeric(attempts_clean["is_correct"], errors="coerce").fillna(0).astype(int)
+
+        # SQL の GROUP BY 処理を pandas で実行
+        agg = attempts_clean.groupby("problem_id").agg(
+            total_attempts=("attempt_id", "count"),
+            correct_count=("is_correct", lambda x: (x == 1).sum()),
+            last_date=("attempt_date", "max")
+        ).reset_index()
+
+        df = pd.merge(problems_df, agg, on="problem_id", how="left")
+        df["total_attempts"] = df["total_attempts"].fillna(0).astype(int)
+        df["correct_count"] = df["correct_count"].fillna(0).astype(int)
 
     today = date.today()
     df["accuracy"] = df.apply(
@@ -64,17 +86,22 @@ def fetch_aggregated_data() -> pd.DataFrame:
     def calc_elapsed(d_str):
         if pd.isna(d_str) or not d_str:
             return None
-        last_d = datetime.strptime(d_str, "%Y-%m-%d").date()
-        return (today - last_d).days
+        try:
+            if isinstance(d_str, (datetime, pd.Timestamp)):
+                last_d = d_str.date()
+            else:
+                last_d = datetime.strptime(str(d_str)[:10], "%Y-%m-%d").date()
+            return (today - last_d).days
+        except Exception:
+            return None
 
     df["elapsed_days"] = df["last_date"].apply(calc_elapsed)
     return df
 
 # -----------------------------------------------------------------------------
-# スタイルシート設定（Mobile-Optimized CSS Injection）
+# スタイルシート設定（Mobile-Optimized Nintendo UI）
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="演習ダッシュボード", layout="centered")
-init_db()
 
 st.markdown("""
 <style>
@@ -86,12 +113,11 @@ st.markdown("""
         -webkit-text-size-adjust: 100%;
     }
 
-    /* Streamlit標準ヘッダーバーの透過処理 */
     header[data-testid="stHeader"] {
         background: transparent !important;
     }
 
-    /* コンテナ余白（ヘッダーバーとの被りを防ぐため上部余白を4.5remに拡大） */
+    /* コンテナ余白（ヘッダー重なり防止のため上部に4.5rem確保） */
     .block-container {
         padding-top: 4.5rem !important;
         padding-bottom: 5rem !important;
@@ -127,7 +153,7 @@ st.markdown("""
         color: #1A1A1A;
     }
 
-    /* タブ切り替え（タップしやすい大型サイズ） */
+    /* タブ切り替え（タッチ領域拡大 & 横スクロール） */
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
         border-bottom: 2px solid #E5E7EB;
@@ -194,7 +220,7 @@ st.markdown("""
         font-weight: 800;
     }
 
-    /* 問題カードグリッド: 800px未満は確実に1列 */
+    /* 問題カードグリッド: スマホでは1列、幅広端末で2列 */
     .cards-grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -325,7 +351,7 @@ st.markdown("""
         color: #FFFFFF;
     }
 
-    /* フォーム入力要素（iOS自動拡大ズーム防止のため16pxを確保） */
+    /* フォーム入力要素（iOS自動拡大防止のため16px確保） */
     div[data-baseweb="select"] > div, input, textarea {
         min-height: 50px !important;
         font-size: 16px !important;
@@ -481,8 +507,7 @@ with tab_catalog:
 # -----------------------------------------------------------------------------
 with tab_entry:
     st.subheader("演習結果を記録する")
-    with get_connection() as conn:
-        problems_df = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
+    problems_df = get_problems_df()
 
     if problems_df.empty:
         st.warning("先に問題マスタを追加してください。")
@@ -515,13 +540,26 @@ with tab_entry:
         st.write("")
         if st.button("この記録を保存する"):
             is_correct_val = 1 if result_str == "正解 (◯)" else 0
-            with get_connection() as conn:
-                conn.execute(
-                    "INSERT INTO attempts (problem_id, attempt_date, is_correct, memo) VALUES (?, ?, ?, ?)",
-                    (selected_problem_id, attempt_date_val.strftime("%Y-%m-%d"), is_correct_val, memo_val)
-                )
-                conn.commit()
-            st.success("演習結果を保存しました。")
+            attempts_df = get_attempts_df()
+
+            # 一意な attempt_id を生成（最大値+1）
+            if attempts_df.empty or "attempt_id" not in attempts_df.columns:
+                next_id = 1
+            else:
+                existing_ids = pd.to_numeric(attempts_df["attempt_id"], errors="coerce").dropna()
+                next_id = int(existing_ids.max() + 1) if not existing_ids.empty else 1
+
+            new_attempt = pd.DataFrame([{
+                "attempt_id": next_id,
+                "problem_id": selected_problem_id,
+                "attempt_date": attempt_date_val.strftime("%Y-%m-%d"),
+                "is_correct": is_correct_val,
+                "memo": memo_val
+            }])
+
+            updated_attempts = pd.concat([attempts_df, new_attempt], ignore_index=True)
+            save_attempts_df(updated_attempts)
+            st.success("演習結果をスプレッドシートに保存しました。")
             st.rerun()
 
 # -----------------------------------------------------------------------------
@@ -537,10 +575,8 @@ with tab_manage:
 
     if sub_action == "問題の新規作成":
         st.subheader("新規問題の追加")
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT subject FROM problems;")
-            existing_subjects = [row[0] for row in cursor.fetchall()]
+        problems_df = get_problems_df()
+        existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
 
         new_id = st.text_input("問題ID（例: EM-001）")
         sub_mode = st.radio("科目の指定方法", ["既存から選択", "新規入力"], horizontal=True)
@@ -555,85 +591,86 @@ with tab_manage:
         st.write("")
         if st.button("問題をカタログに追加"):
             if new_id and new_subject and new_unit and new_title:
-                try:
-                    with get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO problems (problem_id, subject, unit, title) VALUES (?, ?, ?, ?)",
-                            (new_id.strip(), new_subject.strip(), new_unit.strip(), new_title.strip())
-                        )
-                        conn.commit()
-                    st.success(f"問題 [{new_id}] を追加しました。")
-                    st.rerun()
-                except sqlite3.IntegrityError:
+                clean_id = new_id.strip()
+                if not problems_df.empty and clean_id in problems_df["problem_id"].values:
                     st.error("その問題IDは既に存在しています。")
+                else:
+                    new_problem = pd.DataFrame([{
+                        "problem_id": clean_id,
+                        "subject": new_subject.strip(),
+                        "unit": new_unit.strip(),
+                        "title": new_title.strip()
+                    }])
+                    updated_problems = pd.concat([problems_df, new_problem], ignore_index=True)
+                    save_problems_df(updated_problems)
+                    st.success(f"問題 [{clean_id}] をスプレッドシートに追加しました。")
+                    st.rerun()
             else:
                 st.error("すべての必須項目を入力してください。")
 
     elif sub_action == "演習履歴の編集・削除":
         st.subheader("演習履歴の修正・削除")
-        with get_connection() as conn:
-            attempts_raw = pd.read_sql_query("""
-                SELECT a.attempt_id, a.attempt_date, a.problem_id, p.title, a.is_correct, a.memo
-                FROM attempts a
-                JOIN problems p ON a.problem_id = p.problem_id
-                ORDER BY a.attempt_date DESC, a.attempt_id DESC;
-            """, conn)
+        attempts_raw = get_attempts_df()
+        problems_df = get_problems_df()
 
         if attempts_raw.empty:
             st.info("修正可能な演習履歴がありません。")
         else:
+            # 表示用に問題タイトルを結合
+            merged_att = pd.merge(attempts_raw, problems_df[["problem_id", "title"]], on="problem_id", how="left")
+            merged_att["title"] = merged_att["title"].fillna("（不明な問題）")
+            merged_att = merged_att.sort_values(by=["attempt_date", "attempt_id"], ascending=False)
+
             attempt_choices = {
-                f"ID:{row['attempt_id']} | {row['attempt_date']} | [{row['problem_id']}] {row['title']}": row['attempt_id']
-                for _, row in attempts_raw.iterrows()
+                f"ID:{row['attempt_id']} | {row['attempt_date']} | [{row['problem_id']}] {row['title']}": str(row['attempt_id'])
+                for _, row in merged_att.iterrows()
             }
             selected_att_label = st.selectbox("修正対象の履歴", list(attempt_choices.keys()))
             selected_att_id = attempt_choices[selected_att_label]
-            target_row = attempts_raw[attempts_raw["attempt_id"] == selected_att_id].iloc[0]
+            target_row = attempts_raw[attempts_raw["attempt_id"].astype(str) == selected_att_id].iloc[0]
 
-            edit_date = st.date_input(
-                "日付を変更",
-                value=datetime.strptime(target_row["attempt_date"], "%Y-%m-%d").date()
-            )
+            try:
+                def_date = datetime.strptime(str(target_row["attempt_date"])[:10], "%Y-%m-%d").date()
+            except Exception:
+                def_date = date.today()
+
+            edit_date = st.date_input("日付を変更", value=def_date)
             edit_result = st.radio(
                 "結果を変更",
                 ["正解 (◯)", "不正解 (✕)"],
-                index=0 if target_row["is_correct"] == 1 else 1,
+                index=0 if int(target_row["is_correct"]) == 1 else 1,
                 horizontal=True
             )
-            edit_memo = st.text_input("メモを変更", value=target_row["memo"] or "")
+            edit_memo = st.text_input("メモを変更", value=str(target_row["memo"]) if pd.notna(target_row["memo"]) else "")
 
             st.write("")
             col_sav, col_del = st.columns(2)
             with col_sav:
                 if st.button("履歴を更新"):
-                    with get_connection() as conn:
-                        conn.execute("""
-                            UPDATE attempts
-                            SET attempt_date = ?, is_correct = ?, memo = ?
-                            WHERE attempt_id = ?
-                        """, (edit_date.strftime("%Y-%m-%d"), 1 if edit_result == "正解 (◯)" else 0, edit_memo, selected_att_id))
-                        conn.commit()
+                    target_idx = attempts_raw[attempts_raw["attempt_id"].astype(str) == selected_att_id].index
+                    attempts_raw.loc[target_idx, "attempt_date"] = edit_date.strftime("%Y-%m-%d")
+                    attempts_raw.loc[target_idx, "is_correct"] = 1 if edit_result == "正解 (◯)" else 0
+                    attempts_raw.loc[target_idx, "memo"] = edit_memo
+                    save_attempts_df(attempts_raw)
                     st.success("履歴を更新しました。")
                     st.rerun()
 
             with col_del:
                 if st.button("この履歴を削除"):
-                    with get_connection() as conn:
-                        conn.execute("DELETE FROM attempts WHERE attempt_id = ?", (selected_att_id,))
-                        conn.commit()
+                    updated_att = attempts_raw[attempts_raw["attempt_id"].astype(str) != selected_att_id]
+                    save_attempts_df(updated_att)
                     st.warning("履歴を削除しました。")
                     st.rerun()
 
     elif sub_action == "問題マスタの編集・削除":
         st.subheader("問題定義の修正・削除")
-        with get_connection() as conn:
-            problems_raw = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
+        problems_raw = get_problems_df()
 
         if problems_raw.empty:
             st.info("登録済みの問題がありません。")
         else:
             p_choices = {
-                f"[{row['problem_id']}] {row['subject']} - {row['title']}": row['problem_id']
+                f"[{row['problem_id']}] {row['subject']} - {row['title']}": str(row['problem_id'])
                 for _, row in problems_raw.iterrows()
             }
             selected_p_label = st.selectbox("修正対象の問題", list(p_choices.keys()))
@@ -648,20 +685,23 @@ with tab_manage:
             col_psav, col_pdel = st.columns(2)
             with col_psav:
                 if st.button("問題定義を更新"):
-                    with get_connection() as conn:
-                        conn.execute("""
-                            UPDATE problems
-                            SET subject = ?, unit = ?, title = ?
-                            WHERE problem_id = ?
-                        """, (edit_subject.strip(), edit_unit.strip(), edit_title.strip(), selected_p_id))
-                        conn.commit()
+                    p_idx = problems_raw[problems_raw["problem_id"] == selected_p_id].index
+                    problems_raw.loc[p_idx, "subject"] = edit_subject.strip()
+                    problems_raw.loc[p_idx, "unit"] = edit_unit.strip()
+                    problems_raw.loc[p_idx, "title"] = edit_title.strip()
+                    save_problems_df(problems_raw)
                     st.success("問題定義を更新しました。")
                     st.rerun()
 
             with col_pdel:
                 if st.button("この問題を削除"):
-                    with get_connection() as conn:
-                        conn.execute("DELETE FROM problems WHERE problem_id = ?", (selected_p_id,))
-                        conn.commit()
-                    st.warning(f"問題 [{selected_p_id}] を削除しました。")
+                    # 問題マスタから削除
+                    updated_p = problems_raw[problems_raw["problem_id"] != selected_p_id]
+                    save_problems_df(updated_p)
+                    # 関連する履歴も連動削除（カスケード削除）
+                    attempts_df = get_attempts_df()
+                    if not attempts_df.empty:
+                        updated_a = attempts_df[attempts_df["problem_id"] != selected_p_id]
+                        save_attempts_df(updated_a)
+                    st.warning(f"問題 [{selected_p_id}] および関連履歴を削除しました。")
                     st.rerun()
