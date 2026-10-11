@@ -71,395 +71,424 @@ def fetch_aggregated_data() -> pd.DataFrame:
     return df
 
 # -----------------------------------------------------------------------------
-# スタイルシート設定（LINE Style Injection）
+# スタイルシート設定（Nintendo-Inspired Style Injection）
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="演習マネージャー", layout="centered")
+st.set_page_config(page_title="演習ダッシュボード", layout="wide")
 init_db()
 
 st.markdown("""
 <style>
-    /* 全体背景 & タイポグラフィ */
+    /* 全体背景 & フォント設定 */
     .stApp {
-        background-color: #F7F8FA;
-        font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-        color: #111111;
+        background-color: #F8F9FA;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif;
+        color: #1A1A1A;
     }
 
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 2rem;
         padding-bottom: 4rem;
-        max-width: 680px;
+        max-width: 1040px;
     }
 
-    /* LINE風 ヘッダー */
-    .line-header {
+    /* 任天堂風ブランドヘッダー */
+    .nintendo-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        padding: 8px 4px 16px 4px;
-        border-bottom: 1px solid #ECEEF0;
-        margin-bottom: 16px;
+        gap: 12px;
+        margin-bottom: 24px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #EBEBEB;
     }
-    .line-header-title {
-        font-size: 22px;
-        font-weight: 800;
-        color: #111111;
-        letter-spacing: -0.5px;
-    }
-    .line-header-badge {
-        background-color: #06C755;
+    .nintendo-badge {
+        background-color: #E60012;
         color: #FFFFFF;
-        font-size: 11px;
-        font-weight: 700;
-        padding: 4px 10px;
-        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        padding: 5px 12px;
+        border-radius: 6px;
+        text-transform: uppercase;
+    }
+    .nintendo-title {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        color: #1A1A1A;
     }
 
-    /* タブバー（LINEのセグメントスイッチ風） */
+    /* タブデザイン（任天堂公式のアンダーラインスイッチ風） */
     .stTabs [data-baseweb="tab-list"] {
-        background-color: #ECEEF2;
-        padding: 3px;
-        border-radius: 12px;
-        gap: 3px;
+        background-color: transparent;
+        border-bottom: 1px solid #E5E7EB;
+        gap: 24px;
+        padding-left: 0;
     }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 9px;
-        padding: 8px 14px;
+        background-color: transparent !important;
+        border: none !important;
+        padding: 12px 6px;
+        font-size: 15px;
         font-weight: 700;
-        font-size: 13px;
-        color: #8E9297;
-        background-color: transparent;
-        border: none;
+        color: #71717A;
+        position: relative;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        color: #1A1A1A !important;
+    }
+    .stTabs [aria-selected="true"]::after {
+        content: "";
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background-color: #E60012;
+        border-radius: 3px 3px 0 0;
     }
 
-    /* メトリックカード（LINE Pay / ウォレット風の洗練された数値ボックス） */
-    .metrics-container {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 18px;
+    /* サマリーカード（ハードウェアバナー風） */
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin-bottom: 28px;
     }
-    .metric-card {
-        flex: 1;
+    .summary-card {
         background: #FFFFFF;
-        border: 1px solid #EBECEF;
         border-radius: 16px;
-        padding: 12px 14px;
-        text-align: center;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+        padding: 20px 24px;
+        border: 1px solid #EAEAEA;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+        transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.28s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .metric-label {
-        font-size: 11px;
-        font-weight: 600;
-        color: #8E9297;
-        margin-bottom: 4px;
+    .summary-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.08);
     }
-    .metric-value {
-        font-size: 18px;
+    .summary-card.primary {
+        background: linear-gradient(135deg, #E60012 0%, #BA000F 100%);
+        color: #FFFFFF;
+        border: none;
+    }
+    .summary-label {
+        font-size: 13px;
+        font-weight: 700;
+        color: #8E8E93;
+        margin-bottom: 6px;
+    }
+    .summary-card.primary .summary-label {
+        color: rgba(255, 255, 255, 0.85);
+    }
+    .summary-value {
+        font-size: 28px;
         font-weight: 800;
-        color: #111111;
-    }
-    .metric-highlight {
-        color: #06C755;
+        letter-spacing: -0.5px;
     }
 
-    /* LINE トークルーム一覧風 リストカード */
-    .talk-item {
+    /* 問題カードグリッド */
+    .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 18px;
+        margin-top: 18px;
+    }
+
+    /* 個別問題カード（任天堂風マイクロインタラクション） */
+    .nintendo-card {
         background: #FFFFFF;
-        border: 1px solid #ECEEF0;
-        border-radius: 16px;
-        padding: 14px 16px;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        transition: transform 0.1s ease, box-shadow 0.1s ease;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-    }
-    .talk-item:hover {
-        border-color: #DDE0E5;
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
-    }
-
-    /* アイコンバッジ（正答率） */
-    .avatar-badge {
-        width: 48px;
-        height: 48px;
-        border-radius: 16px;
+        border-radius: 18px;
+        padding: 20px 22px;
+        border: 1px solid #ECECEC;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.03);
+        transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+                    box-shadow 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+                    border-color 0.28s ease;
         display: flex;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 800;
-        margin-right: 14px;
-        flex-shrink: 0;
+        justify-content: space-between;
+        cursor: default;
     }
-    .badge-high {
-        background-color: #E8F9EE;
-        color: #06C755;
-    }
-    .badge-mid {
-        background-color: #FFF6E5;
-        color: #FF9500;
-    }
-    .badge-low {
-        background-color: #FFEBEF;
-        color: #FF334B;
-    }
-    .badge-none {
-        background-color: #F0F1F3;
-        color: #8E9297;
-    }
-    .avatar-label {
-        font-size: 9px;
-        font-weight: 600;
-        margin-top: -2px;
+    .nintendo-card:hover {
+        transform: translateY(-4px) scale(1.01);
+        box-shadow: 0 14px 28px -4px rgba(0, 0, 0, 0.10), 0 4px 10px -2px rgba(0, 0, 0, 0.04);
+        border-color: #D6D6D6;
     }
 
-    /* トーク内容（中央） */
-    .talk-main {
-        flex: 1;
-        min-width: 0;
-    }
-    .talk-title-row {
+    .card-top {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 4px;
+        margin-bottom: 10px;
     }
-    .talk-title {
-        font-size: 15px;
+    .tag-subject {
+        background-color: #F1F2F5;
+        color: #27272A;
+        font-size: 11px;
         font-weight: 700;
-        color: #111111;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        padding-right: 8px;
-    }
-    .talk-time {
-        font-size: 11px;
-        color: #9E9E9E;
-        font-weight: 500;
-        white-space: nowrap;
-    }
-    .talk-tags {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: wrap;
-    }
-    .tag-pill {
-        background-color: #F2F3F5;
-        color: #4A4D52;
-        font-size: 11px;
-        font-weight: 600;
-        padding: 2px 8px;
+        padding: 3px 8px;
         border-radius: 6px;
     }
-    .tag-sub {
-        font-size: 11px;
-        color: #8E9297;
+    .tag-unit {
+        font-size: 12px;
+        font-weight: 600;
+        color: #71717A;
     }
-
-    /* 未読風バッジ（要復習アラート） */
-    .review-alert {
-        background-color: #FF334B;
-        color: #FFFFFF;
-        font-size: 10px;
+    .card-title {
+        font-size: 16px;
         font-weight: 700;
-        padding: 2px 7px;
-        border-radius: 10px;
-        margin-left: 6px;
+        color: #1A1A1A;
+        line-height: 1.4;
+        margin-bottom: 14px;
     }
 
-    /* LINE Green ボタン */
+    /* 正答率バー */
+    .progress-wrapper {
+        margin-bottom: 12px;
+    }
+    .progress-label-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+    .progress-bar-bg {
+        width: 100%;
+        height: 7px;
+        background-color: #EAEAEA;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.4s ease;
+    }
+    .fill-green { background-color: #10B981; }
+    .fill-orange { background-color: #F59E0B; }
+    .fill-red { background-color: #EF4444; }
+    .fill-gray { background-color: #D1D5DB; }
+
+    /* カード下部ステータス */
+    .card-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 12px;
+        border-top: 1px solid #F3F4F6;
+        font-size: 12px;
+        font-weight: 600;
+        color: #71717A;
+    }
+    .alert-pill {
+        background-color: #FEE2E2;
+        color: #DC2626;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 12px;
+    }
+    .safe-pill {
+        background-color: #E0F2FE;
+        color: #0284C7;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 12px;
+    }
+
+    /* ボタン（Nintendo Red カプセルスタイル） */
     .stButton > button {
-        background-color: #06C755;
+        background-color: #E60012;
         color: #FFFFFF;
         border: none;
-        border-radius: 12px;
+        border-radius: 30px;
         font-weight: 700;
         font-size: 15px;
-        padding: 12px 20px;
+        padding: 12px 28px;
         width: 100%;
-        transition: background-color 0.15s ease;
+        box-shadow: 0 4px 12px rgba(230, 0, 18, 0.25);
+        transition: all 0.22s cubic-bezier(0.25, 1, 0.5, 1);
     }
     .stButton > button:hover {
-        background-color: #05B34C;
+        background-color: #CC0010;
         color: #FFFFFF;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(230, 0, 18, 0.35);
     }
     .stButton > button:active {
-        background-color: #049B41;
-        transform: scale(0.99);
+        transform: translateY(0);
     }
 
     /* フォームパーツのモダン化 */
     div[data-baseweb="select"], input, textarea {
         border-radius: 10px !important;
-        border-color: #E2E4E8 !important;
+        border-color: #E5E7EB !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# アプリケーションヘッダー
+# ヘッダー
 # -----------------------------------------------------------------------------
 st.markdown("""
-<div class="line-header">
-    <div class="line-header-title">演習ノート</div>
-    <div class="line-header-badge">Study LINE</div>
+<div class="nintendo-header">
+    <div class="nintendo-badge">Study</div>
+    <div class="nintendo-title">演習進捗ダッシュボード</div>
 </div>
 """, unsafe_allow_html=True)
 
-tab_talks, tab_record, tab_settings = st.tabs(["💬 問題一覧", "✏️ 記録する", "⚙️ 設定"])
+tab_overview, tab_entry, tab_control = st.tabs(["カタログ（問題一覧）", "演習ログ登録", "マスタ・履歴管理"])
 
 # -----------------------------------------------------------------------------
-# タブ 1: LINEトーク風 問題一覧
+# タブ 1: カタログ（問題一覧カードグリッド）
 # -----------------------------------------------------------------------------
-with tab_talks:
+with tab_overview:
     data = fetch_aggregated_data()
 
     if data.empty:
-        st.info("まだ問題が登録されていません。「設定」タブから新しい問題を追加してください。")
+        st.info("登録されている問題がありません。「マスタ・履歴管理」タブから新しい問題を追加してください。")
     else:
-        # 上部サマリー（メトリックカード）
+        # 上部サマリーカード
         total_p = len(data)
-        done_p = len(data[data["total_attempts"] > 0])
-        avg_p = data["accuracy"].dropna().mean()
-        avg_text = f"{avg_p:.0f}%" if pd.notna(avg_p) else "-"
+        solved_p = len(data[data["total_attempts"] > 0])
+        avg_acc = data["accuracy"].dropna().mean()
+        avg_str = f"{avg_acc:.1f}%" if pd.notna(avg_acc) else "-"
 
         st.markdown(f"""
-        <div class="metrics-container">
-            <div class="metric-card">
-                <div class="metric-label">全問題</div>
-                <div class="metric-value">{total_p}</div>
+        <div class="summary-grid">
+            <div class="summary-card primary">
+                <div class="summary-label">総問題数</div>
+                <div class="summary-value">{total_p} <span style="font-size:16px;">問</span></div>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">着手済み</div>
-                <div class="metric-value metric-highlight">{done_p}</div>
+            <div class="summary-card">
+                <div class="summary-label">着手済み</div>
+                <div class="summary-value">{solved_p} <span style="font-size:16px;">問</span></div>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">平均正答率</div>
-                <div class="metric-value">{avg_text}</div>
+            <div class="summary-card">
+                <div class="summary-label">全体平均正答率</div>
+                <div class="summary-value">{avg_str}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # 絞り込み & 並び替え
-        col_s, col_sort = st.columns([1, 1])
-        with col_s:
-            sub_filter = st.selectbox(
-                "科目フィルター",
-                ["すべて"] + sorted(list(data["subject"].unique())),
-                label_visibility="collapsed"
+        # 絞り込み & 並び替えコントロール
+        f_col1, f_col2 = st.columns([1, 1])
+        with f_col1:
+            subject_filter = st.selectbox(
+                "科目で絞り込み",
+                ["全科目"] + sorted(list(data["subject"].unique()))
             )
-        with col_sort:
-            sort_opt = st.selectbox(
-                "並び替え",
-                ["復習優先（経過日数順）", "弱点優先（正答率順）", "科目・単元順"],
-                label_visibility="collapsed"
+        with f_col2:
+            sort_metric = st.selectbox(
+                "並び替え基準",
+                ["復習優先（未着手・経過日数が長い順）", "弱点克服（正答率が低い順）", "科目・単元順", "演習回数が少ない順"]
             )
 
-        # フィルタ適用
+        # フィルタリング
         filtered = data.copy()
-        if sub_filter != "すべて":
-            filtered = filtered[filtered["subject"] == sub_filter]
+        if subject_filter != "全科目":
+            filtered = filtered[filtered["subject"] == subject_filter]
 
-        # ソート適用
-        if sort_opt == "復習優先（経過日数順）":
+        # ソート処理
+        if sort_metric == "復習優先（未着手・経過日数が長い順）":
             filtered = filtered.sort_values(by="elapsed_days", ascending=False, na_position="first")
-        elif sort_opt == "弱点優先（正答率順）":
+        elif sort_metric == "弱点克服（正答率が低い順）":
             filtered = filtered.sort_values(by="accuracy", ascending=True, na_position="last")
-        elif sort_opt == "科目・単元順":
+        elif sort_metric == "科目・単元順":
             filtered = filtered.sort_values(by=["subject", "unit", "problem_id"])
+        elif sort_metric == "演習回数が少ない順":
+            filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
-        # トークリスト生成
-        cards_html = ""
+        # カードグリッド生成（HTML）
+        cards_html = '<div class="cards-grid">'
         for _, r in filtered.iterrows():
-            # 正答率とアイコンスタイル判定
+            title_s = html.escape(str(r["title"]))
+            subject_s = html.escape(str(r["subject"]))
+            unit_s = html.escape(str(r["unit"]))
+            p_id = html.escape(str(r["problem_id"]))
+
+            # 正答率とプログレスバー
             if pd.isna(r["accuracy"]):
-                badge_class = "badge-none"
-                badge_val = "-"
-                badge_lbl = "未実施"
-            elif r["accuracy"] >= 80:
-                badge_class = "badge-high"
-                badge_val = f"{int(r['accuracy'])}%"
-                badge_lbl = "得意"
-            elif r["accuracy"] >= 50:
-                badge_class = "badge-mid"
-                badge_val = f"{int(r['accuracy'])}%"
-                badge_lbl = "要復習"
+                acc_text = "未実施"
+                bar_width = 0
+                fill_color = "fill-gray"
             else:
-                badge_class = "badge-low"
-                badge_val = f"{int(r['accuracy'])}%"
-                badge_lbl = "苦手"
+                acc_val = int(r["accuracy"])
+                acc_text = f"{acc_val}%"
+                bar_width = acc_val
+                if acc_val >= 80:
+                    fill_color = "fill-green"
+                elif acc_val >= 50:
+                    fill_color = "fill-orange"
+                else:
+                    fill_color = "fill-red"
 
-            # 経過日数テキスト & 要復習バッジ
+            # 経過日数バッジ
             if pd.isna(r["elapsed_days"]):
-                time_text = "未着手"
-                alert_html = '<span class="review-alert">NEW</span>'
+                status_badge = '<span class="alert-pill">未着手</span>'
+                elapsed_text = "-"
             elif r["elapsed_days"] == 0:
-                time_text = "今日"
-                alert_html = ""
+                status_badge = '<span class="safe-pill">本日実施</span>'
+                elapsed_text = "今日"
             elif r["elapsed_days"] >= 7:
-                time_text = f"{int(r['elapsed_days'])}日前"
-                alert_html = '<span class="review-alert">要復習</span>'
+                status_badge = '<span class="alert-pill">要復習</span>'
+                elapsed_text = f"{int(r['elapsed_days'])}日前"
             else:
-                time_text = f"{int(r['elapsed_days'])}日前"
-                alert_html = ""
-
-            title_safe = html.escape(str(r["title"]))
-            sub_safe = html.escape(str(r["subject"]))
-            unit_safe = html.escape(str(r["unit"]))
-            attempts_text = f"{r['total_attempts']}回実施" if r["total_attempts"] > 0 else "演習なし"
+                status_badge = '<span class="safe-pill">定着中</span>'
+                elapsed_text = f"{int(r['elapsed_days'])}日前"
 
             cards_html += f"""
-            <div class="talk-item">
-                <div class="avatar-badge {badge_class}">
-                    <span>{badge_val}</span>
-                    <span class="avatar-label">{badge_lbl}</span>
+            <div class="nintendo-card">
+                <div>
+                    <div class="card-top">
+                        <span class="tag-subject">[{p_id}] {subject_s}</span>
+                        <span class="tag-unit">{unit_s}</span>
+                    </div>
+                    <div class="card-title">{title_s}</div>
                 </div>
-                <div class="talk-main">
-                    <div class="talk-title-row">
-                        <span class="talk-title">{title_safe}</span>
-                        <div>
-                            <span class="talk-time">{time_text}</span>
-                            {alert_html}
+                <div>
+                    <div class="progress-wrapper">
+                        <div class="progress-label-row">
+                            <span>正答率</span>
+                            <span>{acc_text}</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill {fill_color}" style="width: {bar_width}%;"></div>
                         </div>
                     </div>
-                    <div class="talk-tags">
-                        <span class="tag-pill">{sub_safe}</span>
-                        <span class="tag-sub">{unit_safe}</span>
-                        <span class="tag-sub">・</span>
-                        <span class="tag-sub">{attempts_text}</span>
+                    <div class="card-footer">
+                        <span>最終演習: {elapsed_text} ({r['total_attempts']}回)</span>
+                        {status_badge}
                     </div>
                 </div>
             </div>
             """
+        cards_html += '</div>'
 
         st.markdown(cards_html, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# タブ 2: 演習の記録
+# タブ 2: 演習ログ登録
 # -----------------------------------------------------------------------------
-with tab_record:
-    st.subheader("解いた問題を記録")
+with tab_entry:
+    st.subheader("演習結果を記録する")
     with get_connection() as conn:
         problems_df = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
 
     if problems_df.empty:
-        st.warning("先に問題を追加してください。")
+        st.warning("先に問題マスタを追加してください。")
     else:
-        selected_subject = st.selectbox("科目", problems_df["subject"].unique())
-        filtered_units = problems_df[problems_df["subject"] == selected_subject]["unit"].unique()
-        selected_unit = st.selectbox("単元", filtered_units)
+        c_sub, c_unit = st.columns(2)
+        with c_sub:
+            selected_sub = st.selectbox("科目", problems_df["subject"].unique())
+        with c_unit:
+            filtered_units = problems_df[problems_df["subject"] == selected_sub]["unit"].unique()
+            selected_unit = st.selectbox("単元", filtered_units)
 
         selectable_problems = problems_df[
-            (problems_df["subject"] == selected_subject) & (problems_df["unit"] == selected_unit)
+            (problems_df["subject"] == selected_sub) & (problems_df["unit"] == selected_unit)
         ]
         problem_options = {
             f"[{row['problem_id']}] {row['title']}": row['problem_id']
@@ -468,16 +497,16 @@ with tab_record:
         selected_label = st.selectbox("問題", list(problem_options.keys()))
         selected_problem_id = problem_options[selected_label]
 
-        col_d, col_r = st.columns(2)
-        with col_d:
+        col_date, col_res = st.columns(2)
+        with col_date:
             attempt_date_val = st.date_input("実施日", value=date.today())
-        with col_r:
-            result_str = st.radio("判定", ["正解 (◯)", "不正解 (✕)"], horizontal=True)
+        with col_res:
+            result_str = st.radio("結果判定", ["正解 (◯)", "不正解 (✕)"], horizontal=True)
 
-        memo_val = st.text_input("復習メモ（任意）", placeholder="解法のポイントや間違えた理由")
+        memo_val = st.text_input("演習メモ（つまずいた定理・公式や解法の要点）")
 
         st.write("")
-        if st.button("記録を保存する"):
+        if st.button("この記録を保存する"):
             is_correct_val = 1 if result_str == "正解 (◯)" else 0
             with get_connection() as conn:
                 conn.execute(
@@ -485,37 +514,38 @@ with tab_record:
                     (selected_problem_id, attempt_date_val.strftime("%Y-%m-%d"), is_correct_val, memo_val)
                 )
                 conn.commit()
-            st.success("演習結果を保存しました！")
+            st.success("演習結果を保存しました。")
             st.rerun()
 
 # -----------------------------------------------------------------------------
-# タブ 3: 設定・管理（マスタ追加・編集・削除）
+# タブ 3: マスタ・履歴管理
 # -----------------------------------------------------------------------------
-with tab_settings:
+with tab_control:
     sub_action = st.radio(
-        "設定項目",
-        ["問題の追加", "履歴の修正・削除", "問題の修正・削除"],
+        "操作を選択",
+        ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
         horizontal=True
     )
     st.write("---")
 
-    if sub_action == "問題の追加":
+    if sub_action == "問題の新規作成":
+        st.subheader("新規問題の追加")
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT subject FROM problems;")
             existing_subjects = [row[0] for row in cursor.fetchall()]
 
-        new_id = st.text_input("問題ID", placeholder="例: EM-001")
-        sub_mode = st.radio("科目の指定", ["既存から選択", "新規入力"], horizontal=True)
+        new_id = st.text_input("問題ID（一意のコード: 例 EM-001）")
+        sub_mode = st.radio("科目の指定方法", ["既存から選択", "新規入力"], horizontal=True)
         if sub_mode == "既存から選択" and existing_subjects:
             new_subject = st.selectbox("既存の科目", existing_subjects)
         else:
-            new_subject = st.text_input("科目名", placeholder="例: 電磁気学")
+            new_subject = st.text_input("新規科目名")
 
-        new_unit = st.text_input("単元名", placeholder="例: ガウスの法則")
-        new_title = st.text_input("問題名", placeholder="例: 球対称電荷の電界")
+        new_unit = st.text_input("単元名（例: ビオ・サバールの法則）")
+        new_title = st.text_input("問題名（例: 円形電流の作る磁界）")
 
-        if st.button("この問題を登録する"):
+        if st.button("問題をカタログに追加"):
             if new_id and new_subject and new_unit and new_title:
                 try:
                     with get_connection() as conn:
@@ -524,14 +554,15 @@ with tab_settings:
                             (new_id.strip(), new_subject.strip(), new_unit.strip(), new_title.strip())
                         )
                         conn.commit()
-                    st.success(f"問題 [{new_id}] を登録しました。")
+                    st.success(f"問題 [{new_id}] を追加しました。")
                     st.rerun()
                 except sqlite3.IntegrityError:
                     st.error("その問題IDは既に存在しています。")
             else:
                 st.error("すべての必須項目を入力してください。")
 
-    elif sub_action == "履歴の修正・削除":
+    elif sub_action == "演習履歴の編集・削除":
+        st.subheader("演習履歴の修正・削除")
         with get_connection() as conn:
             attempts_raw = pd.read_sql_query("""
                 SELECT a.attempt_id, a.attempt_date, a.problem_id, p.title, a.is_correct, a.memo
@@ -541,30 +572,30 @@ with tab_settings:
             """, conn)
 
         if attempts_raw.empty:
-            st.info("修正可能な履歴がありません。")
+            st.info("修正可能な演習履歴がありません。")
         else:
             attempt_choices = {
                 f"ID:{row['attempt_id']} | {row['attempt_date']} | [{row['problem_id']}] {row['title']}": row['attempt_id']
                 for _, row in attempts_raw.iterrows()
             }
-            selected_att_label = st.selectbox("修正する履歴を選択", list(attempt_choices.keys()))
+            selected_att_label = st.selectbox("修正対象の履歴", list(attempt_choices.keys()))
             selected_att_id = attempt_choices[selected_att_label]
             target_row = attempts_raw[attempts_raw["attempt_id"] == selected_att_id].iloc[0]
 
             edit_date = st.date_input(
-                "日付の変更",
+                "日付を変更",
                 value=datetime.strptime(target_row["attempt_date"], "%Y-%m-%d").date()
             )
             edit_result = st.radio(
-                "結果の変更",
+                "結果を変更",
                 ["正解 (◯)", "不正解 (✕)"],
                 index=0 if target_row["is_correct"] == 1 else 1,
                 horizontal=True
             )
-            edit_memo = st.text_input("メモの変更", value=target_row["memo"] or "")
+            edit_memo = st.text_input("メモを変更", value=target_row["memo"] or "")
 
-            c_save, c_del = st.columns(2)
-            if c_save.button("変更を保存"):
+            col_sav, col_del = st.columns(2)
+            if col_sav.button("履歴を更新"):
                 with get_connection() as conn:
                     conn.execute("""
                         UPDATE attempts
@@ -575,14 +606,15 @@ with tab_settings:
                 st.success("履歴を更新しました。")
                 st.rerun()
 
-            if c_del.button("この履歴を削除"):
+            if col_del.button("この履歴を削除"):
                 with get_connection() as conn:
                     conn.execute("DELETE FROM attempts WHERE attempt_id = ?", (selected_att_id,))
                     conn.commit()
                 st.warning("履歴を削除しました。")
                 st.rerun()
 
-    elif sub_action == "問題の修正・削除":
+    elif sub_action == "問題マスタの編集・削除":
+        st.subheader("問題定義の修正・削除")
         with get_connection() as conn:
             problems_raw = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
 
@@ -593,7 +625,7 @@ with tab_settings:
                 f"[{row['problem_id']}] {row['subject']} - {row['title']}": row['problem_id']
                 for _, row in problems_raw.iterrows()
             }
-            selected_p_label = st.selectbox("修正する問題を選択", list(p_choices.keys()))
+            selected_p_label = st.selectbox("修正対象の問題", list(p_choices.keys()))
             selected_p_id = p_choices[selected_p_label]
             target_p = problems_raw[problems_raw["problem_id"] == selected_p_id].iloc[0]
 
@@ -601,8 +633,8 @@ with tab_settings:
             edit_unit = st.text_input("単元名", value=target_p["unit"])
             edit_title = st.text_input("問題名", value=target_p["title"])
 
-            cp_save, cp_del = st.columns(2)
-            if cp_save.button("問題情報を更新"):
+            col_psav, col_pdel = st.columns(2)
+            if col_psav.button("問題定義を更新"):
                 with get_connection() as conn:
                     conn.execute("""
                         UPDATE problems
@@ -610,10 +642,10 @@ with tab_settings:
                         WHERE problem_id = ?
                     """, (edit_subject.strip(), edit_unit.strip(), edit_title.strip(), selected_p_id))
                     conn.commit()
-                st.success("問題情報を更新しました。")
+                st.success("問題定義を更新しました。")
                 st.rerun()
 
-            if cp_del.button("この問題を削除"):
+            if col_pdel.button("この問題を削除"):
                 with get_connection() as conn:
                     conn.execute("DELETE FROM problems WHERE problem_id = ?", (selected_p_id,))
                     conn.commit()
