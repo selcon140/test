@@ -467,7 +467,9 @@ with tab_overview:
             """
         cards_html += '</div>'
 
-        st.markdown(cards_html, unsafe_allow_html=True)
+        # 各行の先頭空白（インデント）を除去し、Markdownによるコードブロック誤認を防止
+        clean_cards_html = "\n".join(line.strip() for line in cards_html.splitlines())
+        st.markdown(clean_cards_html, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # タブ 2: 演習ログ登録
