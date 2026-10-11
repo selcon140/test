@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import date, datetime
+import html
 import pandas as pd
 import streamlit as st
 
@@ -39,13 +40,13 @@ def init_db():
 def fetch_aggregated_data() -> pd.DataFrame:
     query = """
         SELECT
-            p.problem_id AS "問題ID",
-            p.subject AS "科目",
-            p.unit AS "単元",
-            p.title AS "問題名",
-            COUNT(a.attempt_id) AS "演習回数",
-            SUM(CASE WHEN a.is_correct = 1 THEN 1 ELSE 0 END) AS "正解数",
-            MAX(a.attempt_date) AS "最終実施日"
+            p.problem_id AS problem_id,
+            p.subject AS subject,
+            p.unit AS unit,
+            p.title AS title,
+            COUNT(a.attempt_id) AS total_attempts,
+            SUM(CASE WHEN a.is_correct = 1 THEN 1 ELSE 0 END) AS correct_count,
+            MAX(a.attempt_date) AS last_date
         FROM problems p
         LEFT JOIN attempts a ON p.problem_id = a.problem_id
         GROUP BY p.problem_id;
@@ -54,240 +55,467 @@ def fetch_aggregated_data() -> pd.DataFrame:
         df = pd.read_sql_query(query, conn)
 
     today = date.today()
-    df["正答率(%)"] = df.apply(
-        lambda row: round((row["正解数"] / row["演習回数"]) * 100, 1) if row["演習回数"] > 0 else None,
+    df["accuracy"] = df.apply(
+        lambda row: round((row["correct_count"] / row["total_attempts"]) * 100, 1)
+        if row["total_attempts"] > 0 else None,
         axis=1
     )
 
-    def calc_elapsed_days(last_date_str):
-        if pd.isna(last_date_str) or not last_date_str:
+    def calc_elapsed(d_str):
+        if pd.isna(d_str) or not d_str:
             return None
-        last_d = datetime.strptime(last_date_str, "%Y-%m-%d").date()
+        last_d = datetime.strptime(d_str, "%Y-%m-%d").date()
         return (today - last_d).days
 
-    df["経過日数(日)"] = df["最終実施日"].apply(calc_elapsed_days)
+    df["elapsed_days"] = df["last_date"].apply(calc_elapsed)
     return df
 
 # -----------------------------------------------------------------------------
-# ページ設定と iOS 風スタイルシート（CSS Injection）
+# スタイルシート設定（LINE Style Injection）
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="Study Tracker", layout="centered")
+st.set_page_config(page_title="演習マネージャー", layout="centered")
 init_db()
 
-# iOS デザインシステムの注入
 st.markdown("""
 <style>
-    /* 全体の背景色とフォントを iOS 風に指定 */
+    /* 全体背景 & タイポグラフィ */
     .stApp {
-        background-color: #F2F2F7;
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
-        color: #1C1C1E;
+        background-color: #F7F8FA;
+        font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+        color: #111111;
     }
 
-    /* 上部ヘッダーの余白調整 */
     .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 700px; /* iPhoneで見やすい横幅 */
+        padding-top: 1.5rem;
+        padding-bottom: 4rem;
+        max-width: 680px;
     }
 
-    /* iOS 風カードコンテナ */
-    div[data-testid="stVerticalBlock"] > div.css-card {
-        background: #FFFFFF;
-        border-radius: 18px;
-        padding: 20px;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+    /* LINE風 ヘッダー */
+    .line-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 4px 16px 4px;
+        border-bottom: 1px solid #ECEEF0;
         margin-bottom: 16px;
-        border: 1px solid rgba(0, 0, 0, 0.03);
+    }
+    .line-header-title {
+        font-size: 22px;
+        font-weight: 800;
+        color: #111111;
+        letter-spacing: -0.5px;
+    }
+    .line-header-badge {
+        background-color: #06C755;
+        color: #FFFFFF;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 20px;
     }
 
-    /* タブ（セグメントコントロール風） */
+    /* タブバー（LINEのセグメントスイッチ風） */
     .stTabs [data-baseweb="tab-list"] {
-        background-color: #E5E5EA;
-        padding: 4px;
+        background-color: #ECEEF2;
+        padding: 3px;
         border-radius: 12px;
-        gap: 4px;
+        gap: 3px;
     }
     .stTabs [data-baseweb="tab"] {
         border-radius: 9px;
-        padding: 6px 16px;
-        font-weight: 600;
-        font-size: 14px;
-        color: #8E8E93;
+        padding: 8px 14px;
+        font-weight: 700;
+        font-size: 13px;
+        color: #8E9297;
         background-color: transparent;
         border: none;
     }
     .stTabs [aria-selected="true"] {
         background-color: #FFFFFF !important;
-        color: #000000 !important;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+        color: #111111 !important;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     }
 
-    /* ボタン（iOS プライマリブルー & 角丸カプセル型） */
-    .stButton > button {
-        background-color: #007AFF;
-        color: white;
-        border: none;
-        border-radius: 14px;
+    /* メトリックカード（LINE Pay / ウォレット風の洗練された数値ボックス） */
+    .metrics-container {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+    .metric-card {
+        flex: 1;
+        background: #FFFFFF;
+        border: 1px solid #EBECEF;
+        border-radius: 16px;
+        padding: 12px 14px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+    }
+    .metric-label {
+        font-size: 11px;
         font-weight: 600;
-        font-size: 16px;
-        padding: 12px 24px;
+        color: #8E9297;
+        margin-bottom: 4px;
+    }
+    .metric-value {
+        font-size: 18px;
+        font-weight: 800;
+        color: #111111;
+    }
+    .metric-highlight {
+        color: #06C755;
+    }
+
+    /* LINE トークルーム一覧風 リストカード */
+    .talk-item {
+        background: #FFFFFF;
+        border: 1px solid #ECEEF0;
+        border-radius: 16px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+    .talk-item:hover {
+        border-color: #DDE0E5;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    /* アイコンバッジ（正答率） */
+    .avatar-badge {
+        width: 48px;
+        height: 48px;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 800;
+        margin-right: 14px;
+        flex-shrink: 0;
+    }
+    .badge-high {
+        background-color: #E8F9EE;
+        color: #06C755;
+    }
+    .badge-mid {
+        background-color: #FFF6E5;
+        color: #FF9500;
+    }
+    .badge-low {
+        background-color: #FFEBEF;
+        color: #FF334B;
+    }
+    .badge-none {
+        background-color: #F0F1F3;
+        color: #8E9297;
+    }
+    .avatar-label {
+        font-size: 9px;
+        font-weight: 600;
+        margin-top: -2px;
+    }
+
+    /* トーク内容（中央） */
+    .talk-main {
+        flex: 1;
+        min-width: 0;
+    }
+    .talk-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+    }
+    .talk-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: #111111;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding-right: 8px;
+    }
+    .talk-time {
+        font-size: 11px;
+        color: #9E9E9E;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+    .talk-tags {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .tag-pill {
+        background-color: #F2F3F5;
+        color: #4A4D52;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 6px;
+    }
+    .tag-sub {
+        font-size: 11px;
+        color: #8E9297;
+    }
+
+    /* 未読風バッジ（要復習アラート） */
+    .review-alert {
+        background-color: #FF334B;
+        color: #FFFFFF;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 10px;
+        margin-left: 6px;
+    }
+
+    /* LINE Green ボタン */
+    .stButton > button {
+        background-color: #06C755;
+        color: #FFFFFF;
+        border: none;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 15px;
+        padding: 12px 20px;
         width: 100%;
-        transition: all 0.2s ease;
+        transition: background-color 0.15s ease;
     }
     .stButton > button:hover {
-        background-color: #0062CC;
-        color: white;
+        background-color: #05B34C;
+        color: #FFFFFF;
     }
     .stButton > button:active {
-        transform: scale(0.98);
+        background-color: #049B41;
+        transform: scale(0.99);
     }
 
-    /* 入力フォームの角丸化 */
-    input, select, textarea, div[data-baseweb="select"] {
-        border-radius: 12px !important;
+    /* フォームパーツのモダン化 */
+    div[data-baseweb="select"], input, textarea {
+        border-radius: 10px !important;
+        border-color: #E2E4E8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# アプリヘッダー
-st.title("📚 演習トラッカー")
+# -----------------------------------------------------------------------------
+# アプリケーションヘッダー
+# -----------------------------------------------------------------------------
+st.markdown("""
+<div class="line-header">
+    <div class="line-header-title">演習ノート</div>
+    <div class="line-header-badge">Study LINE</div>
+</div>
+""", unsafe_allow_html=True)
 
-# タブナビゲーション（スマホで見やすい上部タブ）
-tab_dash, tab_log, tab_manage = st.tabs(["📊 ダッシュボード", "✍️ 演習記録", "⚙️ 設定・管理"])
+tab_talks, tab_record, tab_settings = st.tabs(["💬 問題一覧", "✏️ 記録する", "⚙️ 設定"])
 
 # -----------------------------------------------------------------------------
-# タブ 1: ダッシュボード（集計・一覧）
+# タブ 1: LINEトーク風 問題一覧
 # -----------------------------------------------------------------------------
-with tab_dash:
+with tab_talks:
     data = fetch_aggregated_data()
+
     if data.empty:
-        st.info("登録されている問題がありません。「設定・管理」タブから問題を追加してください。")
+        st.info("まだ問題が登録されていません。「設定」タブから新しい問題を追加してください。")
     else:
-        # 簡易サマリーカード
-        c1, c2, c3 = st.columns(3)
-        c1.metric("総問題数", f"{len(data)} 問")
-        solved_count = len(data[data["演習回数"] > 0])
-        c2.metric("着手済み", f"{solved_count} 問")
-        avg_acc = data["正答率(%)"].dropna().mean()
-        c3.metric("平均正答率", f"{avg_acc:.1f}%" if pd.notna(avg_acc) else "-")
+        # 上部サマリー（メトリックカード）
+        total_p = len(data)
+        done_p = len(data[data["total_attempts"] > 0])
+        avg_p = data["accuracy"].dropna().mean()
+        avg_text = f"{avg_p:.0f}%" if pd.notna(avg_p) else "-"
 
-        st.write("")
-        # フィルタ & ソート
-        filter_sub = st.selectbox("科目で絞り込み", ["全科目"] + sorted(list(data["科目"].unique())))
-        sort_target = st.selectbox(
-            "並び替え",
-            ["経過日数が長い順（復習優先）", "正答率が低い順（弱点克服）", "科目・単元順", "演習回数が少ない順"]
-        )
+        st.markdown(f"""
+        <div class="metrics-container">
+            <div class="metric-card">
+                <div class="metric-label">全問題</div>
+                <div class="metric-value">{total_p}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">着手済み</div>
+                <div class="metric-value metric-highlight">{done_p}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">平均正答率</div>
+                <div class="metric-value">{avg_text}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        view_df = data.copy()
-        if filter_sub != "全科目":
-            view_df = view_df[view_df["科目"] == filter_sub]
+        # 絞り込み & 並び替え
+        col_s, col_sort = st.columns([1, 1])
+        with col_s:
+            sub_filter = st.selectbox(
+                "科目フィルター",
+                ["すべて"] + sorted(list(data["subject"].unique())),
+                label_visibility="collapsed"
+            )
+        with col_sort:
+            sort_opt = st.selectbox(
+                "並び替え",
+                ["復習優先（経過日数順）", "弱点優先（正答率順）", "科目・単元順"],
+                label_visibility="collapsed"
+            )
 
-        if sort_target == "経過日数が長い順（復習優先）":
-            view_df = view_df.sort_values(by="経過日数(日)", ascending=False, na_position="first")
-        elif sort_target == "正答率が低い順（弱点克服）":
-            view_df = view_df.sort_values(by="正答率(%)", ascending=True, na_position="last")
-        elif sort_target == "科目・単元順":
-            view_df = view_df.sort_values(by=["科目", "単元", "問題ID"])
-        elif sort_target == "演習回数が少ない順":
-            view_df = view_df.sort_values(by="演習回数", ascending=True)
+        # フィルタ適用
+        filtered = data.copy()
+        if sub_filter != "すべて":
+            filtered = filtered[filtered["subject"] == sub_filter]
 
-        st.dataframe(
-            view_df,
-            column_config={
-                "正答率(%)": st.column_config.ProgressColumn(
-                    "正答率",
-                    format="%.1f%%",
-                    min_value=0,
-                    max_value=100,
-                ),
-                "経過日数(日)": st.column_config.NumberColumn(
-                    "最終演習",
-                    format="%d 日前",
-                ),
-                "演習回数": st.column_config.NumberColumn(format="%d 回"),
-                "正解数": st.column_config.NumberColumn(format="%d 回"),
-            },
-            hide_index=True,
-            use_container_width=True,
-        )
+        # ソート適用
+        if sort_opt == "復習優先（経過日数順）":
+            filtered = filtered.sort_values(by="elapsed_days", ascending=False, na_position="first")
+        elif sort_opt == "弱点優先（正答率順）":
+            filtered = filtered.sort_values(by="accuracy", ascending=True, na_position="last")
+        elif sort_opt == "科目・単元順":
+            filtered = filtered.sort_values(by=["subject", "unit", "problem_id"])
+
+        # トークリスト生成
+        cards_html = ""
+        for _, r in filtered.iterrows():
+            # 正答率とアイコンスタイル判定
+            if pd.isna(r["accuracy"]):
+                badge_class = "badge-none"
+                badge_val = "-"
+                badge_lbl = "未実施"
+            elif r["accuracy"] >= 80:
+                badge_class = "badge-high"
+                badge_val = f"{int(r['accuracy'])}%"
+                badge_lbl = "得意"
+            elif r["accuracy"] >= 50:
+                badge_class = "badge-mid"
+                badge_val = f"{int(r['accuracy'])}%"
+                badge_lbl = "要復習"
+            else:
+                badge_class = "badge-low"
+                badge_val = f"{int(r['accuracy'])}%"
+                badge_lbl = "苦手"
+
+            # 経過日数テキスト & 要復習バッジ
+            if pd.isna(r["elapsed_days"]):
+                time_text = "未着手"
+                alert_html = '<span class="review-alert">NEW</span>'
+            elif r["elapsed_days"] == 0:
+                time_text = "今日"
+                alert_html = ""
+            elif r["elapsed_days"] >= 7:
+                time_text = f"{int(r['elapsed_days'])}日前"
+                alert_html = '<span class="review-alert">要復習</span>'
+            else:
+                time_text = f"{int(r['elapsed_days'])}日前"
+                alert_html = ""
+
+            title_safe = html.escape(str(r["title"]))
+            sub_safe = html.escape(str(r["subject"]))
+            unit_safe = html.escape(str(r["unit"]))
+            attempts_text = f"{r['total_attempts']}回実施" if r["total_attempts"] > 0 else "演習なし"
+
+            cards_html += f"""
+            <div class="talk-item">
+                <div class="avatar-badge {badge_class}">
+                    <span>{badge_val}</span>
+                    <span class="avatar-label">{badge_lbl}</span>
+                </div>
+                <div class="talk-main">
+                    <div class="talk-title-row">
+                        <span class="talk-title">{title_safe}</span>
+                        <div>
+                            <span class="talk-time">{time_text}</span>
+                            {alert_html}
+                        </div>
+                    </div>
+                    <div class="talk-tags">
+                        <span class="tag-pill">{sub_safe}</span>
+                        <span class="tag-sub">{unit_safe}</span>
+                        <span class="tag-sub">・</span>
+                        <span class="tag-sub">{attempts_text}</span>
+                    </div>
+                </div>
+            </div>
+            """
+
+        st.markdown(cards_html, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# タブ 2: 演習ログの記録
+# タブ 2: 演習の記録
 # -----------------------------------------------------------------------------
-with tab_log:
+with tab_record:
     st.subheader("解いた問題を記録")
     with get_connection() as conn:
         problems_df = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
 
     if problems_df.empty:
-        st.warning("先に問題マスタを登録してください。")
+        st.warning("先に問題を追加してください。")
     else:
-        with st.container():
-            selected_subject = st.selectbox("科目", problems_df["subject"].unique())
-            filtered_units = problems_df[problems_df["subject"] == selected_subject]["unit"].unique()
-            selected_unit = st.selectbox("単元", filtered_units)
+        selected_subject = st.selectbox("科目", problems_df["subject"].unique())
+        filtered_units = problems_df[problems_df["subject"] == selected_subject]["unit"].unique()
+        selected_unit = st.selectbox("単元", filtered_units)
 
-            selectable_problems = problems_df[
-                (problems_df["subject"] == selected_subject) & (problems_df["unit"] == selected_unit)
-            ]
-            problem_options = {
-                f"[{row['problem_id']}] {row['title']}": row['problem_id']
-                for _, row in selectable_problems.iterrows()
-            }
-            selected_label = st.selectbox("問題", list(problem_options.keys()))
-            selected_problem_id = problem_options[selected_label]
+        selectable_problems = problems_df[
+            (problems_df["subject"] == selected_subject) & (problems_df["unit"] == selected_unit)
+        ]
+        problem_options = {
+            f"[{row['problem_id']}] {row['title']}": row['problem_id']
+            for _, row in selectable_problems.iterrows()
+        }
+        selected_label = st.selectbox("問題", list(problem_options.keys()))
+        selected_problem_id = problem_options[selected_label]
 
-            col_d, col_r = st.columns(2)
-            with col_d:
-                attempt_date_val = st.date_input("実施日", value=date.today())
-            with col_r:
-                result_str = st.radio("結果", ["正解 (◯)", "不正解 (✕)"], horizontal=True)
+        col_d, col_r = st.columns(2)
+        with col_d:
+            attempt_date_val = st.date_input("実施日", value=date.today())
+        with col_r:
+            result_str = st.radio("判定", ["正解 (◯)", "不正解 (✕)"], horizontal=True)
 
-            memo_val = st.text_input("メモ（つまずいた箇所など）")
+        memo_val = st.text_input("復習メモ（任意）", placeholder="解法のポイントや間違えた理由")
 
-            if st.button("記録を保存する"):
-                is_correct_val = 1 if result_str == "正解 (◯)" else 0
-                with get_connection() as conn:
-                    conn.execute(
-                        "INSERT INTO attempts (problem_id, attempt_date, is_correct, memo) VALUES (?, ?, ?, ?)",
-                        (selected_problem_id, attempt_date_val.strftime("%Y-%m-%d"), is_correct_val, memo_val)
-                    )
-                    conn.commit()
-                st.success("演習結果を保存しました。")
-                st.rerun()
+        st.write("")
+        if st.button("記録を保存する"):
+            is_correct_val = 1 if result_str == "正解 (◯)" else 0
+            with get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO attempts (problem_id, attempt_date, is_correct, memo) VALUES (?, ?, ?, ?)",
+                    (selected_problem_id, attempt_date_val.strftime("%Y-%m-%d"), is_correct_val, memo_val)
+                )
+                conn.commit()
+            st.success("演習結果を保存しました！")
+            st.rerun()
 
 # -----------------------------------------------------------------------------
 # タブ 3: 設定・管理（マスタ追加・編集・削除）
 # -----------------------------------------------------------------------------
-with tab_manage:
-    manage_mode = st.radio(
-        "管理項目",
-        ["問題の新規登録", "過去ログの修正・削除", "問題マスタの修正・削除"],
+with tab_settings:
+    sub_action = st.radio(
+        "設定項目",
+        ["問題の追加", "履歴の修正・削除", "問題の修正・削除"],
         horizontal=True
     )
     st.write("---")
 
-    # 1. 新規問題の登録
-    if manage_mode == "問題の新規登録":
-        st.subheader("新しい問題を追加")
+    if sub_action == "問題の追加":
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT subject FROM problems;")
             existing_subjects = [row[0] for row in cursor.fetchall()]
 
-        new_id = st.text_input("問題ID（例: EM-001）")
+        new_id = st.text_input("問題ID", placeholder="例: EM-001")
         sub_mode = st.radio("科目の指定", ["既存から選択", "新規入力"], horizontal=True)
         if sub_mode == "既存から選択" and existing_subjects:
-            new_subject = st.selectbox("既存科目", existing_subjects)
+            new_subject = st.selectbox("既存の科目", existing_subjects)
         else:
-            new_subject = st.text_input("科目名")
+            new_subject = st.text_input("科目名", placeholder="例: 電磁気学")
 
-        new_unit = st.text_input("単元名（例: ガウスの法則）")
-        new_title = st.text_input("問題名（例: 点電荷の電界）")
+        new_unit = st.text_input("単元名", placeholder="例: ガウスの法則")
+        new_title = st.text_input("問題名", placeholder="例: 球対称電荷の電界")
 
-        if st.button("問題をデータベースに登録"):
+        if st.button("この問題を登録する"):
             if new_id and new_subject and new_unit and new_title:
                 try:
                     with get_connection() as conn:
@@ -296,16 +524,14 @@ with tab_manage:
                             (new_id.strip(), new_subject.strip(), new_unit.strip(), new_title.strip())
                         )
                         conn.commit()
-                    st.success(f"問題 [{new_id}] を追加しました。")
+                    st.success(f"問題 [{new_id}] を登録しました。")
                     st.rerun()
                 except sqlite3.IntegrityError:
-                    st.error("その問題IDはすでに存在しています。")
+                    st.error("その問題IDは既に存在しています。")
             else:
                 st.error("すべての必須項目を入力してください。")
 
-    # 2. 過去履歴の編集・削除
-    elif manage_mode == "過去ログの修正・削除":
-        st.subheader("演習ログの編集・削除")
+    elif sub_action == "履歴の修正・削除":
         with get_connection() as conn:
             attempts_raw = pd.read_sql_query("""
                 SELECT a.attempt_id, a.attempt_date, a.problem_id, p.title, a.is_correct, a.memo
@@ -315,30 +541,30 @@ with tab_manage:
             """, conn)
 
         if attempts_raw.empty:
-            st.info("修正可能な演習履歴がありません。")
+            st.info("修正可能な履歴がありません。")
         else:
             attempt_choices = {
                 f"ID:{row['attempt_id']} | {row['attempt_date']} | [{row['problem_id']}] {row['title']}": row['attempt_id']
                 for _, row in attempts_raw.iterrows()
             }
-            selected_att_label = st.selectbox("編集する履歴", list(attempt_choices.keys()))
+            selected_att_label = st.selectbox("修正する履歴を選択", list(attempt_choices.keys()))
             selected_att_id = attempt_choices[selected_att_label]
             target_row = attempts_raw[attempts_raw["attempt_id"] == selected_att_id].iloc[0]
 
             edit_date = st.date_input(
-                "日付を変更",
+                "日付の変更",
                 value=datetime.strptime(target_row["attempt_date"], "%Y-%m-%d").date()
             )
             edit_result = st.radio(
-                "結果を変更",
+                "結果の変更",
                 ["正解 (◯)", "不正解 (✕)"],
                 index=0 if target_row["is_correct"] == 1 else 1,
                 horizontal=True
             )
-            edit_memo = st.text_input("メモを変更", value=target_row["memo"] or "")
+            edit_memo = st.text_input("メモの変更", value=target_row["memo"] or "")
 
-            col_u, col_d = st.columns(2)
-            if col_u.button("更新を保存"):
+            c_save, c_del = st.columns(2)
+            if c_save.button("変更を保存"):
                 with get_connection() as conn:
                     conn.execute("""
                         UPDATE attempts
@@ -349,16 +575,14 @@ with tab_manage:
                 st.success("履歴を更新しました。")
                 st.rerun()
 
-            if col_d.button("この履歴を削除"):
+            if c_del.button("この履歴を削除"):
                 with get_connection() as conn:
                     conn.execute("DELETE FROM attempts WHERE attempt_id = ?", (selected_att_id,))
                     conn.commit()
                 st.warning("履歴を削除しました。")
                 st.rerun()
 
-    # 3. 問題マスタの編集・削除
-    elif manage_mode == "問題マスタの修正・削除":
-        st.subheader("問題定義の修正・削除")
+    elif sub_action == "問題の修正・削除":
         with get_connection() as conn:
             problems_raw = pd.read_sql_query("SELECT problem_id, subject, unit, title FROM problems", conn)
 
@@ -369,7 +593,7 @@ with tab_manage:
                 f"[{row['problem_id']}] {row['subject']} - {row['title']}": row['problem_id']
                 for _, row in problems_raw.iterrows()
             }
-            selected_p_label = st.selectbox("編集する問題", list(p_choices.keys()))
+            selected_p_label = st.selectbox("修正する問題を選択", list(p_choices.keys()))
             selected_p_id = p_choices[selected_p_label]
             target_p = problems_raw[problems_raw["problem_id"] == selected_p_id].iloc[0]
 
@@ -377,8 +601,8 @@ with tab_manage:
             edit_unit = st.text_input("単元名", value=target_p["unit"])
             edit_title = st.text_input("問題名", value=target_p["title"])
 
-            col_pu, col_pd = st.columns(2)
-            if col_pu.button("問題定義を更新"):
+            cp_save, cp_del = st.columns(2)
+            if cp_save.button("問題情報を更新"):
                 with get_connection() as conn:
                     conn.execute("""
                         UPDATE problems
@@ -386,10 +610,10 @@ with tab_manage:
                         WHERE problem_id = ?
                     """, (edit_subject.strip(), edit_unit.strip(), edit_title.strip(), selected_p_id))
                     conn.commit()
-                st.success("問題定義を更新しました。")
+                st.success("問題情報を更新しました。")
                 st.rerun()
 
-            if col_pd.button("この問題を削除"):
+            if cp_del.button("この問題を削除"):
                 with get_connection() as conn:
                     conn.execute("DELETE FROM problems WHERE problem_id = ?", (selected_p_id,))
                     conn.commit()
