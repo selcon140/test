@@ -71,14 +71,14 @@ def fetch_aggregated_data() -> pd.DataFrame:
     return df
 
 # -----------------------------------------------------------------------------
-# スタイルシート設定（Mobile-First CSS Injection）
+# スタイルシート設定（Mobile-Optimized CSS Injection）
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="演習ダッシュボード", layout="centered")
 init_db()
 
 st.markdown("""
 <style>
-    /* 基本設定（モバイルファースト） */
+    /* 全体設定 */
     .stApp {
         background-color: #F8F9FA;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif;
@@ -86,13 +86,13 @@ st.markdown("""
         -webkit-text-size-adjust: 100%;
     }
 
-    /* 画面コンテナの余白をスマホに最適化 */
+    /* コンテナ余白（スマホで全幅を活用） */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 5rem !important;
-        padding-left: 12px !important;
-        padding-right: 12px !important;
-        max-width: 860px !important;
+        padding-left: 14px !important;
+        padding-right: 14px !important;
+        max-width: 820px !important;
         width: 100% !important;
     }
 
@@ -122,7 +122,7 @@ st.markdown("""
         color: #1A1A1A;
     }
 
-    /* タブ切り替え（タップしやすい高さ・横スクロール対応） */
+    /* タブ切り替え（タップしやすい大型サイズ） */
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
         border-bottom: 2px solid #E5E7EB;
@@ -134,11 +134,12 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         background-color: transparent !important;
         border: none !important;
-        padding: 12px 14px !important;
-        font-size: 15px !important;
+        padding: 12px 16px !important;
+        font-size: 16px !important;
         font-weight: 700;
         color: #71717A;
         white-space: nowrap;
+        min-height: 48px;
     }
     .stTabs [aria-selected="true"] {
         color: #1A1A1A !important;
@@ -154,7 +155,7 @@ st.markdown("""
         border-radius: 3px 3px 0 0;
     }
 
-    /* サマリーカード: デフォルト（スマホ）で大きく見やすい3列 */
+    /* サマリーカード */
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -164,7 +165,7 @@ st.markdown("""
     .summary-card {
         background: #FFFFFF;
         border-radius: 14px;
-        padding: 14px 8px;
+        padding: 14px 6px;
         border: 1px solid #EAEAEA;
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
         text-align: center;
@@ -188,23 +189,16 @@ st.markdown("""
         font-weight: 800;
     }
 
-    /* 問題カードグリッド: モバイルファースト
-       スマホ（幅狭）: 1カラム（横幅いっぱい）
-       タブレット・PC（幅広）: 自動で2〜3カラム */
+    /* 問題カードグリッド: 800px未満は確実に1列 */
     .cards-grid {
         display: grid;
-        grid-template-columns: 1fr; /* スマホでは確実に1列！ */
+        grid-template-columns: 1fr;
         gap: 14px;
         margin-top: 14px;
     }
-    @media (min-width: 680px) {
+    @media (min-width: 800px) {
         .cards-grid {
-            grid-template-columns: repeat(2, 1fr); /* iPad・中画面で2列 */
-        }
-    }
-    @media (min-width: 950px) {
-        .cards-grid {
-            grid-template-columns: repeat(3, 1fr); /* PC大画面で3列 */
+            grid-template-columns: repeat(2, 1fr);
         }
     }
 
@@ -212,7 +206,7 @@ st.markdown("""
     .nintendo-card {
         background: #FFFFFF;
         border-radius: 18px;
-        padding: 18px 20px;
+        padding: 20px;
         border: 1px solid #ECECEC;
         box-shadow: 0 3px 8px rgba(0, 0, 0, 0.03);
         display: flex;
@@ -222,13 +216,6 @@ st.markdown("""
     }
     .nintendo-card:active {
         transform: scale(0.985);
-    }
-    @media (hover: hover) and (pointer: fine) {
-        .nintendo-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 12px 24px -4px rgba(0, 0, 0, 0.10);
-            border-color: #D6D6D6;
-        }
     }
 
     .card-top {
@@ -251,14 +238,14 @@ st.markdown("""
         color: #71717A;
     }
     .card-title {
-        font-size: 19px; /* スマホでパッと読める大見出し */
+        font-size: 20px;
         font-weight: 800;
         color: #1A1A1A;
         line-height: 1.4;
         margin-bottom: 16px;
     }
 
-    /* 正答率バー（太く視認性向上） */
+    /* 正答率バー */
     .progress-wrapper {
         margin-bottom: 14px;
     }
@@ -291,7 +278,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding-top: 12px;
+        padding-top: 14px;
         border-top: 1px solid #F3F4F6;
         font-size: 13px;
         font-weight: 600;
@@ -314,7 +301,7 @@ st.markdown("""
         border-radius: 12px;
     }
 
-    /* ボタン（Nintendo Red & 52px高の確実なタッチターゲット） */
+    /* ボタン（Nintendo Red: 52px高） */
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -333,7 +320,7 @@ st.markdown("""
         color: #FFFFFF;
     }
 
-    /* フォーム入力要素（iOSの自動拡大ズーム防止のため16px以上を維持） */
+    /* フォーム入力要素（iOS自動拡大ズーム防止のため16pxを確保） */
     div[data-baseweb="select"] > div, input, textarea {
         min-height: 50px !important;
         font-size: 16px !important;
@@ -417,7 +404,6 @@ with tab_catalog:
         elif sort_metric == "演習回数が少ない順":
             filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
-        # カードグリッド生成
         cards_html = '<div class="cards-grid">\n'
         for _, r in filtered.iterrows():
             title_s = html.escape(str(r["title"]))
@@ -535,7 +521,7 @@ with tab_entry:
 # -----------------------------------------------------------------------------
 # タブ 3: マスタ・履歴管理
 # -----------------------------------------------------------------------------
-with tab_control:
+with tab_manage:  # ★ 変数名を修正（tab_control -> tab_manage）
     sub_action = st.radio(
         "操作を選択",
         ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
