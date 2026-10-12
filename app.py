@@ -323,6 +323,27 @@ st.markdown("""
         color: #E60012 !important;
     }
 
+    /* 全展開・特殊フォルダボタンスタイル */
+    div.all-folder-btn > button {
+        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 14px !important;
+        box-shadow: 0 3px 8px rgba(15, 23, 42, 0.15) !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+        min-height: 48px !important;
+        text-align: left !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
+        transition: all 0.2s ease !important;
+    }
+    div.all-folder-btn > button:hover {
+        background: linear-gradient(135deg, #334155 0%, #1E293B 100%) !important;
+        color: #FFFFFF !important;
+    }
+
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
         border-bottom: 2px solid #E5E7EB;
@@ -446,6 +467,15 @@ st.markdown("""
         padding: 3px 8px;
         border-radius: 6px;
         border: 1px solid #DBEAFE;
+    }
+    .tag-folder-pill {
+        background-color: #F3F4F6;
+        color: #4B5563;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+        border: 1px solid #E5E7EB;
     }
     .tag-unit {
         font-size: 13px;
@@ -748,15 +778,15 @@ except Exception as e:
 
 if load_success:
     tab_catalog, tab_books, tab_todo, tab_entry, tab_manage = st.tabs([
-        "📁 エクスプローラー",
-        "📖 参考書進捗",
-        "✅ ToDoタスク",
-        "✏️ 演習記録",
+        "📁 エクスプローラー", 
+        "📖 参考書進捗", 
+        "✅ ToDoタスク", 
+        "✏️ 演習記録", 
         "⚙️ マスタ管理"
     ])
 
     # -----------------------------------------------------------------------------
-    # タブ 1: エクスプローラー
+    # タブ 1: エクスプローラー（全問題展開ビュー対応）
     # -----------------------------------------------------------------------------
     with tab_catalog:
         data = fetch_aggregated_data(problems_df, attempts_df)
@@ -788,34 +818,57 @@ if load_success:
             st.markdown("\n".join(line.strip() for line in summary_html.splitlines()), unsafe_allow_html=True)
 
             curr = st.session_state.current_folder
-            parts = [p for p in curr.strip("/").split("/") if p]
+            is_all_view = (curr == "__ALL__")
 
-            b_cols = st.columns(len(parts) + 2)
-            with b_cols[0]:
-                if st.button("🏠 ホーム", key="bc_root", use_container_width=True):
-                    st.session_state.current_folder = "/"
-                    st.rerun()
-
-            acc_path = ""
-            for idx, part in enumerate(parts):
-                acc_path += "/" + part
-                with b_cols[idx + 1]:
-                    if st.button(f"📁 {part}", key=f"bc_{idx}_{part}", use_container_width=True):
-                        st.session_state.current_folder = acc_path
+            # --- パンくずナビゲーションバー（右端に「🌐 全問題一覧」を常駐） ---
+            if is_all_view:
+                b_cols = st.columns([1.2, 2.5])
+                with b_cols[0]:
+                    if st.button("🏠 ホームへ戻る", key="bc_back_home", use_container_width=True):
+                        st.session_state.current_folder = "/"
+                        st.rerun()
+                with b_cols[1]:
+                    st.button("🌐 すべての問題（全展開中）", key="bc_all_active", disabled=True, use_container_width=True)
+                st.caption("現在のディレクトリ: `🌐 すべての問題（全フォルダ階層を展開中）`")
+            else:
+                parts = [p for p in curr.strip("/").split("/") if p]
+                b_cols = st.columns(len(parts) + 2)
+                with b_cols[0]:
+                    if st.button("🏠 ホーム", key="bc_root", use_container_width=True):
+                        st.session_state.current_folder = "/"
                         st.rerun()
 
-            st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
+                acc_path = ""
+                for idx, part in enumerate(parts):
+                    acc_path += "/" + part
+                    with b_cols[idx + 1]:
+                        if st.button(f"📁 {part}", key=f"bc_{idx}_{part}", use_container_width=True):
+                            st.session_state.current_folder = acc_path
+                            st.rerun()
+
+                # パンくずバーの右端に「🌐 全問題一覧」クイックアクセスボタン
+                with b_cols[-1]:
+                    if st.button("🌐 全問題一覧", key="bc_to_all_view", use_container_width=True):
+                        st.session_state.current_folder = "__ALL__"
+                        st.rerun()
+
+                st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
 
             all_known_paths = sorted(list(set(data["folder_path"].unique()).union(st.session_state.created_folders)))
-            current_problems = data[data["folder_path"] == curr].copy()
+            
+            # 対象問題の抽出（全展開モードなら全データ、通常なら直下のみ）
+            if is_all_view:
+                current_problems = data.copy()
+            else:
+                current_problems = data[data["folder_path"] == curr].copy()
 
-            # 上部ツールバー
+            # 上部ツールバー（フォルダ操作・移動）
             with st.expander("🛠️ フォルダ操作・問題の移動（上部ツールバー）", expanded=False):
                 tb_action = st.radio("操作を選択", ["📂 問題を別のフォルダへ移動", "➕ 新しいフォルダを作成"], horizontal=True)
 
                 if tb_action == "📂 問題を別のフォルダへ移動":
-                    p_scope = st.radio("移動対象の絞り込み", ["現在のフォルダ内の問題", "全フォルダの問題から選択"], horizontal=True)
-                    candidate_df = current_problems if p_scope == "現在のフォルダ内の問題" else data
+                    p_scope = st.radio("移動対象の絞り込み", ["現在の表示内の問題", "全問題から選択"], horizontal=True)
+                    candidate_df = current_problems if p_scope == "現在の表示内の問題" else data
 
                     if candidate_df.empty:
                         st.caption("移動対象となる問題が存在しません。")
@@ -851,29 +904,46 @@ if load_success:
                     new_folder_name = st.text_input("新規フォルダ名（例: ビオ・サバールの法則）")
                     if st.button("この階層に作成", key="btn_create_folder_upper"):
                         if new_folder_name.strip():
-                            target_dir = posixpath.join(st.session_state.current_folder, new_folder_name.strip())
+                            base_dir = "/" if is_all_view else st.session_state.current_folder
+                            target_dir = posixpath.join(base_dir, new_folder_name.strip())
                             st.session_state.created_folders.add(target_dir)
                             st.success(f"フォルダ「{new_folder_name.strip()}」を作成しました。")
                             st.rerun()
 
             st.write("")
 
+            # サブフォルダ一覧の解析（通常表示時のみ表示）
             sub_folders = set()
-            for p in all_known_paths:
-                p_clean = "/" + p.strip("/") if p.strip("/") else "/"
-                if p_clean != curr and p_clean.startswith(curr if curr == "/" else curr + "/"):
-                    rel = p_clean[len(curr):].strip("/")
-                    direct_child = rel.split("/")[0]
-                    sub_folders.add(direct_child)
-            sub_folders = sorted(list(sub_folders))
+            if not is_all_view:
+                for p in all_known_paths:
+                    p_clean = "/" + p.strip("/") if p.strip("/") else "/"
+                    if p_clean != curr and p_clean.startswith(curr if curr == "/" else curr + "/"):
+                        rel = p_clean[len(curr):].strip("/")
+                        direct_child = rel.split("/")[0]
+                        sub_folders.add(direct_child)
+                sub_folders = sorted(list(sub_folders))
 
-            if sub_folders:
+            # --- フォルダ一覧表示 ---
+            if not is_all_view:
                 st.write("**📁 フォルダ**")
                 f_cols = st.columns(2)
+                col_offset = 0
+
+                # ルート（ホーム）を開いている場合、先頭に「🌐 すべての問題」カードを配置
+                if curr == "/":
+                    with f_cols[0]:
+                        st.markdown('<div class="all-folder-btn">', unsafe_allow_html=True)
+                        if st.button(f"🌐 すべての問題（全展開） ({total_p}問)", key="btn_goto_all_folder", use_container_width=True):
+                            st.session_state.current_folder = "__ALL__"
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    col_offset = 1
+
                 for f_idx, s_folder in enumerate(sub_folders):
                     next_path = posixpath.join(curr, s_folder)
                     count_in_sub = len(data[data["folder_path"].str.startswith(next_path)])
-                    with f_cols[f_idx % 2]:
+                    target_col_idx = (f_idx + col_offset) % 2
+                    with f_cols[target_col_idx]:
                         st.markdown('<div class="folder-btn">', unsafe_allow_html=True)
                         if st.button(f"📁 {s_folder} ({count_in_sub}問)", key=f"folder_goto_{s_folder}", use_container_width=True):
                             st.session_state.current_folder = next_path
@@ -881,14 +951,14 @@ if load_success:
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-            if current_problems.empty and not sub_folders:
+            # --- 問題カード一覧の表示 ---
+            if current_problems.empty and not sub_folders and not is_all_view:
                 st.info("このフォルダには問題がありません。")
             elif not current_problems.empty:
-                st.write(f"**📄 問題一覧（{len(current_problems)}問）**")
+                section_title = f"**🌐 すべての問題一覧（全 {len(current_problems)} 問）**" if is_all_view else f"**📄 問題一覧（{len(current_problems)}問）**"
+                st.write(section_title)
 
-                # =========================================================================
-                # ★ 並び替え（ソート: Sorting）およびランダムシャッフル機能
-                # =========================================================================
+                # 並び替え（ソート）およびランダムシャッフル機能
                 col_sort, col_rand_btn = st.columns([2.5, 1.2])
                 with col_sort:
                     sort_metric = st.selectbox(
@@ -954,10 +1024,14 @@ if load_success:
                     title_s = html.escape(str(r["title"]))
                     subject_s = html.escape(str(r["subject"]))
                     unit_s = html.escape(str(r["unit"]))
+                    folder_path_s = html.escape(str(r.get("folder_path", "/")))
                     p_id_s = html.escape(p_id_raw)
 
                     files_list = parse_attached_files(r.get("file_id", ""), r.get("file_name", ""))
                     file_badge = f'<span class="tag-file-badge">📎 資料 ({len(files_list)}件)</span>' if files_list else ""
+                    
+                    # 全展開モード時は格納フォルダのパスバッジを表示
+                    folder_pill_html = f'<span class="tag-folder-pill">📁 {folder_path_s}</span>' if is_all_view else ""
 
                     if pd.isna(r["accuracy"]):
                         acc_text = "未実施"
@@ -1045,6 +1119,7 @@ if load_success:
 <div class="card-top">
 <span class="tag-subject">[{p_id_s}] {subject_s}</span>
 <div style="display:flex; gap:6px; align-items:center;">
+{folder_pill_html}
 {file_badge}
 <span class="tag-unit">{unit_s}</span>
 </div>
@@ -1126,7 +1201,6 @@ if load_success:
             st.write(f"**全体進捗（{curr_pg} / {total_pg} ページ完了）**")
             st.progress(rate / 100.0)
 
-            # 進捗追記フォーム
             with st.expander("✏️ 進捗を追記・記録する", expanded=False):
                 struct_raw = str(target_book.get("structure_json", "[]")).strip()
                 try:
@@ -1135,7 +1209,7 @@ if load_success:
                     struct_data = []
 
                 chapter_names = [ch.get("chapter_name", "") for ch in struct_data if ch.get("chapter_name")]
-
+                
                 c_ch, c_un = st.columns(2)
                 with c_ch:
                     if chapter_names:
@@ -1212,7 +1286,7 @@ if load_success:
             if not target_logs.empty:
                 target_logs["log_date"] = pd.to_datetime(target_logs["log_date"])
                 target_logs["cumulative_page"] = pd.to_numeric(target_logs["cumulative_page"], errors="coerce").fillna(0).astype(int)
-
+                
                 chart_df = target_logs.sort_values(by="log_date").groupby(target_logs["log_date"].dt.strftime("%Y-%m-%d"))["cumulative_page"].max().reset_index()
                 chart_df.columns = ["日付", "到達ページ数"]
 
@@ -1221,7 +1295,7 @@ if load_success:
                 base = alt.Chart(chart_df).encode(
                     x=alt.X("日付:T", title="日付", axis=alt.Axis(format="%Y-%m-%d", labelAngle=-30)),
                     y=alt.Y(
-                        "到達ページ数:Q",
+                        "到達ページ数:Q", 
                         title="到達ページ数 (p)",
                         scale=alt.Scale(domain=[0, y_max_limit], clamp=True),
                         axis=alt.Axis(
@@ -1603,9 +1677,9 @@ if load_success:
         sub_action = st.radio(
             "操作を選択",
             [
-                "新規問題の追加（複数ファイル添付対応）",
-                "問題マスタ・添付ファイルの編集・削除",
-                "演習履歴の編集・削除",
+                "新規問題の追加（複数ファイル添付対応）", 
+                "問題マスタ・添付ファイルの編集・削除", 
+                "演習履歴の編集・削除", 
                 "参考書マスタの編集・削除"
             ],
             horizontal=True
@@ -1840,17 +1914,17 @@ if load_success:
                 edit_b_title = st.text_input("参考書名", value=target_b_m["title"])
                 edit_b_subject = st.text_input("科目名", value=target_b_m["subject"])
                 edit_b_total = st.number_input(
-                    "総ページ数",
-                    min_value=1,
-                    max_value=5000,
-                    value=int(target_b_m["total_pages"]),
+                    "総ページ数", 
+                    min_value=1, 
+                    max_value=5000, 
+                    value=int(target_b_m["total_pages"]), 
                     step=10
                 )
                 edit_b_curr = st.number_input(
-                    "現在の到達ページ数",
-                    min_value=0,
-                    max_value=int(edit_b_total),
-                    value=int(target_b_m["current_pages"]),
+                    "現在の到達ページ数", 
+                    min_value=0, 
+                    max_value=int(edit_b_total), 
+                    value=int(target_b_m["current_pages"]), 
                     step=1
                 )
 
