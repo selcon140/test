@@ -1,5 +1,6 @@
 from datetime import date, datetime
 import html
+import posixpath
 import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
@@ -12,20 +13,27 @@ def get_connection():
 
 @st.cache_data(ttl=60)
 def get_problems_df() -> pd.DataFrame:
-    """問題マスタ（problems シート）をキャッシュして取得（group_name 列を自動補完）"""
+    """問題マスタ（problems シート）をキャッシュして取得（folder_path 列を自動補完）"""
     conn = get_connection()
     df = conn.read(worksheet="problems")
     if df is None or df.empty:
-        return pd.DataFrame(columns=["problem_id", "subject", "unit", "title", "group_name"])
+        return pd.DataFrame(columns=["problem_id", "subject", "unit", "title", "folder_path"])
     df = df.dropna(how="all")
     for col in ["problem_id", "subject", "unit", "title"]:
         if col not in df.columns:
             df[col] = ""
-    # group_name 列が存在しない場合は unit、または "デフォルト" で安全に補完
-    if "group_name" not in df.columns:
-        df["group_name"] = df["unit"].replace("", "デフォルト")
-    else:
-        df["group_name"] = df["group_name"].fillna("デフォルト").replace("", "デフォルト")
+
+    # folder_path 列が存在しない場合は group_name や unit から自動生成（デフォルトは "/"）
+    if "folder_path" not in df.columns:
+        if "group_name" in df.columns:
+            df["folder_path"] = "/" + df["group_name"].replace("デフォルト", "").str.strip()
+        else:
+            df["folder_path"] = "/"
+
+    df["folder_path"] = df["folder_path"].fillna("/").replace("", "/")
+    df["folder_path"] = df["folder_path"].apply(
+        lambda p: "/" + p.strip("/") if p.strip("/") else "/"
+    )
     df = df.astype(str)
     df = df[df["problem_id"].str.strip() != ""]
     return df
@@ -103,7 +111,7 @@ def fetch_aggregated_data(problems_df: pd.DataFrame, attempts_df: pd.DataFrame) 
     return df
 
 # -----------------------------------------------------------------------------
-# スタイルシート設定（Mobile-Optimized Nintendo UI）
+# スタイルシート設定（Mobile-Optimized Explorer UI）
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="演習ダッシュボード", layout="centered")
 
@@ -149,6 +157,52 @@ st.markdown("""
         font-weight: 800;
         letter-spacing: -0.5px;
         color: #1A1A1A;
+    }
+
+    /* エクスプローラー パンくずナビゲーション */
+    .breadcrumb-container {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: #FFFFFF;
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        padding: 8px 14px;
+        margin-bottom: 14px;
+        overflow-x: auto;
+        white-space: nowrap;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .breadcrumb-segment {
+        font-size: 13px;
+        font-weight: 700;
+        color: #4B5563;
+    }
+    .breadcrumb-arrow {
+        color: #9CA3AF;
+        font-size: 12px;
+    }
+
+    /* フォルダカードボタンスタイル */
+    div.folder-btn > button {
+        background: #FFFFFF !important;
+        color: #1F2937 !important;
+        border: 1.5px solid #E5E7EB !important;
+        border-radius: 14px !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+        min-height: 48px !important;
+        text-align: left !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
+        transition: all 0.2s ease !important;
+    }
+    div.folder-btn > button:hover {
+        border-color: #E60012 !important;
+        background: #FFF5F5 !important;
+        color: #E60012 !important;
     }
 
     /* エラー通知用カード */
@@ -216,7 +270,6 @@ st.markdown("""
         border-radius: 3px 3px 0 0;
     }
 
-    /* サマリーカード */
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -250,7 +303,6 @@ st.markdown("""
         font-weight: 800;
     }
 
-    /* 問題カードグリッド */
     .cards-grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -308,19 +360,6 @@ st.markdown("""
         padding: 4px 10px;
         border-radius: 8px;
     }
-    .tag-meta-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .tag-group {
-        background-color: #FEE2E2;
-        color: #B91C1C;
-        font-size: 12px;
-        font-weight: 700;
-        padding: 3px 8px;
-        border-radius: 6px;
-    }
     .tag-unit {
         font-size: 13px;
         font-weight: 600;
@@ -334,7 +373,6 @@ st.markdown("""
         margin-bottom: 16px;
     }
 
-    /* 正答率バー */
     .progress-wrapper {
         margin-bottom: 14px;
     }
@@ -516,13 +554,19 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 st.markdown("""
 <div class="nintendo-header">
-    <div class="nintendo-badge">Study</div>
+    <div class="nintendo-badge">Explorer</div>
     <div class="nintendo-title">演習ダッシュボード</div>
 </div>
 """, unsafe_allow_html=True)
 
+# セッション状態（現在閲覧中のフォルダ階層と空フォルダキャッシュ）
+if "current_folder" not in st.session_state:
+    st.session_state.current_folder = "/"
+if "created_folders" not in st.session_state:
+    st.session_state.created_folders = set()
+
 # -----------------------------------------------------------------------------
-# データ取得部（エラーハンドリング機構: Error Handling）
+# データ取得部（エラーハンドリング機構）
 # -----------------------------------------------------------------------------
 try:
     problems_df = get_problems_df()
@@ -572,10 +616,10 @@ except Exception as e:
 
 # 正常に読み込めた場合のみメインUIを描画
 if load_success:
-    tab_catalog, tab_entry, tab_manage = st.tabs(["📚 カタログ（一覧）", "✏️ 演習記録", "⚙️ マスタ管理"])
+    tab_catalog, tab_entry, tab_manage = st.tabs(["📁 エクスプローラー", "✏️ 演習記録", "⚙️ マスタ管理"])
 
     # -----------------------------------------------------------------------------
-    # タブ 1: カタログ（問題一覧 & 履歴展開）
+    # タブ 1: エクスプローラー（フォルダ階層 & 問題一覧）
     # -----------------------------------------------------------------------------
     with tab_catalog:
         data = fetch_aggregated_data(problems_df, attempts_df)
@@ -588,6 +632,7 @@ if load_success:
             avg_acc = data["accuracy"].dropna().mean()
             avg_str = f"{avg_acc:.1f}%" if pd.notna(avg_acc) else "-"
 
+            # サマリーカード
             summary_html = f"""
             <div class="summary-grid">
                 <div class="summary-card primary">
@@ -606,127 +651,170 @@ if load_success:
             """
             st.markdown("\n".join(line.strip() for line in summary_html.splitlines()), unsafe_allow_html=True)
 
-            # 多段階絞り込み（科目・グループ・並び替え）
-            col_f1, col_f2, col_f3 = st.columns(3)
-            with col_f1:
-                subject_filter = st.selectbox(
-                    "科目絞り込み",
-                    ["全科目"] + sorted(list(data["subject"].unique()))
-                )
-            with col_f2:
-                # 科目選択に連動したグループ一覧を抽出
-                if subject_filter == "全科目":
-                    available_groups = sorted(list(data["group_name"].unique()))
-                else:
-                    available_groups = sorted(list(data[data["subject"] == subject_filter]["group_name"].unique()))
-                group_filter = st.selectbox(
-                    "グループ絞り込み",
-                    ["全グループ"] + available_groups
-                )
-            with col_f3:
+            # --- パンくずリスト（Breadcrumbs Navigation） ---
+            curr = st.session_state.current_folder
+            parts = [p for p in curr.strip("/").split("/") if p]
+
+            # パンくずUI表示
+            b_cols = st.columns(len(parts) + 2)
+            with b_cols[0]:
+                if st.button("🏠 ホーム", key="bc_root", use_container_width=True):
+                    st.session_state.current_folder = "/"
+                    st.rerun()
+
+            acc_path = ""
+            for idx, part in enumerate(parts):
+                acc_path += "/" + part
+                with b_cols[idx + 1]:
+                    if st.button(f"📁 {part}", key=f"bc_{idx}_{part}", use_container_width=True):
+                        st.session_state.current_folder = acc_path
+                        st.rerun()
+
+            # 現在のパス表示バー
+            st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
+
+            # --- フォルダ操作ツールバー ---
+            with st.expander("➕ 新しいフォルダを作成"):
+                new_folder_name = st.text_input("フォルダ名（例: ビオ・サバールの法則）")
+                if st.button("この階層に作成"):
+                    if new_folder_name.strip():
+                        target_dir = posixpath.join(st.session_state.current_folder, new_folder_name.strip())
+                        st.session_state.created_folders.add(target_dir)
+                        st.success(f"フォルダ「{new_folder_name.strip()}」を作成しました。")
+                        st.rerun()
+                    else:
+                        st.warning("フォルダ名を入力してください。")
+
+            # --- ディレクトリ解析（直下のサブフォルダ & 問題の抽出） ---
+            all_known_paths = set(data["folder_path"].unique()).union(st.session_state.created_folders)
+
+            sub_folders = set()
+            for p in all_known_paths:
+                p_clean = "/" + p.strip("/") if p.strip("/") else "/"
+                if p_clean != curr and p_clean.startswith(curr if curr == "/" else curr + "/"):
+                    rel = p_clean[len(curr):].strip("/")
+                    direct_child = rel.split("/")[0]
+                    sub_folders.add(direct_child)
+            sub_folders = sorted(list(sub_folders))
+
+            # 直下の問題を取得
+            current_problems = data[data["folder_path"] == curr].copy()
+
+            # --- 1. サブフォルダ一覧の表示 ---
+            if sub_folders:
+                st.write("**📁 フォルダ**")
+                f_cols = st.columns(2)
+                for f_idx, s_folder in enumerate(sub_folders):
+                    next_path = posixpath.join(curr, s_folder)
+                    # そのフォルダ以下にある問題数を集計
+                    count_in_sub = len(data[data["folder_path"].str.startswith(next_path)])
+                    col_target = f_cols[f_idx % 2]
+                    with col_target:
+                        st.markdown('<div class="folder-btn">', unsafe_allow_html=True)
+                        if st.button(f"📁 {s_folder} ({count_in_sub}問)", key=f"folder_goto_{s_folder}", use_container_width=True):
+                            st.session_state.current_folder = next_path
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                st.write("")
+
+            # --- 2. 問題カード一覧の表示 ---
+            if current_problems.empty and not sub_folders:
+                st.info("このフォルダには問題やサブフォルダがありません。マスタ管理から問題を追加するか、移動してください。")
+            elif not current_problems.empty:
+                st.write(f"**📄 問題一覧（{len(current_problems)}問）**")
+
+                # 並び替えフィルター
                 sort_metric = st.selectbox(
                     "並び替え基準",
-                    ["復習優先（経過日数が長い順）", "弱点克服（正答率が低い順）", "グループ・単元順", "演習回数が少ない順"]
+                    ["復習優先（経過日数が長い順）", "弱点克服（正答率が低い順）", "問題ID順", "演習回数が少ない順"]
                 )
+                if sort_metric == "復習優先（経過日数が長い順）":
+                    current_problems = current_problems.sort_values(by="elapsed_days", ascending=False, na_position="first")
+                elif sort_metric == "弱点克服（正答率が低い順）":
+                    current_problems = current_problems.sort_values(by="accuracy", ascending=True, na_position="last")
+                elif sort_metric == "問題ID順":
+                    current_problems = current_problems.sort_values(by="problem_id")
+                elif sort_metric == "演習回数が少ない順":
+                    current_problems = current_problems.sort_values(by="total_attempts", ascending=True)
 
-            filtered = data.copy()
-            if subject_filter != "全科目":
-                filtered = filtered[filtered["subject"] == subject_filter]
-            if group_filter != "全グループ":
-                filtered = filtered[filtered["group_name"] == group_filter]
+                cards_html = '<div class="cards-grid">\n'
+                for _, r in current_problems.iterrows():
+                    p_id_raw = str(r["problem_id"])
+                    title_s = html.escape(str(r["title"]))
+                    subject_s = html.escape(str(r["subject"]))
+                    unit_s = html.escape(str(r["unit"]))
+                    p_id_s = html.escape(p_id_raw)
 
-            if sort_metric == "復習優先（経過日数が長い順）":
-                filtered = filtered.sort_values(by="elapsed_days", ascending=False, na_position="first")
-            elif sort_metric == "弱点克服（正答率が低い順）":
-                filtered = filtered.sort_values(by="accuracy", ascending=True, na_position="last")
-            elif sort_metric == "グループ・単元順":
-                filtered = filtered.sort_values(by=["group_name", "unit", "problem_id"])
-            elif sort_metric == "演習回数が少ない順":
-                filtered = filtered.sort_values(by="total_attempts", ascending=True)
-
-            # アコーディオン形式のカードグリッド生成
-            cards_html = '<div class="cards-grid">\n'
-            for _, r in filtered.iterrows():
-                p_id_raw = str(r["problem_id"])
-                title_s = html.escape(str(r["title"]))
-                subject_s = html.escape(str(r["subject"]))
-                unit_s = html.escape(str(r["unit"]))
-                group_s = html.escape(str(r.get("group_name", "デフォルト")))
-                p_id_s = html.escape(p_id_raw)
-
-                if pd.isna(r["accuracy"]):
-                    acc_text = "未実施"
-                    bar_width = 0
-                    fill_color = "fill-gray"
-                else:
-                    acc_val = int(r["accuracy"])
-                    acc_text = f"{acc_val}%"
-                    bar_width = acc_val
-                    if acc_val >= 80:
-                        fill_color = "fill-green"
-                    elif acc_val >= 50:
-                        fill_color = "fill-orange"
+                    if pd.isna(r["accuracy"]):
+                        acc_text = "未実施"
+                        bar_width = 0
+                        fill_color = "fill-gray"
                     else:
-                        fill_color = "fill-red"
+                        acc_val = int(r["accuracy"])
+                        acc_text = f"{acc_val}%"
+                        bar_width = acc_val
+                        if acc_val >= 80:
+                            fill_color = "fill-green"
+                        elif acc_val >= 50:
+                            fill_color = "fill-orange"
+                        else:
+                            fill_color = "fill-red"
 
-                if pd.isna(r["elapsed_days"]):
-                    status_badge = '<span class="alert-pill">未着手</span>'
-                    elapsed_text = "-"
-                elif r["elapsed_days"] == 0:
-                    status_badge = '<span class="safe-pill">本日実施</span>'
-                    elapsed_text = "今日"
-                elif r["elapsed_days"] >= 7:
-                    status_badge = '<span class="alert-pill">要復習</span>'
-                    elapsed_text = f"{int(r['elapsed_days'])}日前"
-                else:
-                    status_badge = '<span class="safe-pill">定着中</span>'
-                    elapsed_text = f"{int(r['elapsed_days'])}日前"
+                    if pd.isna(r["elapsed_days"]):
+                        status_badge = '<span class="alert-pill">未着手</span>'
+                        elapsed_text = "-"
+                    elif r["elapsed_days"] == 0:
+                        status_badge = '<span class="safe-pill">本日実施</span>'
+                        elapsed_text = "今日"
+                    elif r["elapsed_days"] >= 7:
+                        status_badge = '<span class="alert-pill">要復習</span>'
+                        elapsed_text = f"{int(r['elapsed_days'])}日前"
+                    else:
+                        status_badge = '<span class="safe-pill">定着中</span>'
+                        elapsed_text = f"{int(r['elapsed_days'])}日前"
 
-                # 該当問題の演習履歴を抽出
-                if not attempts_df.empty:
-                    p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy()
-                else:
-                    p_att = pd.DataFrame()
+                    # 該当問題の演習履歴を抽出
+                    if not attempts_df.empty:
+                        p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy()
+                    else:
+                        p_att = pd.DataFrame()
 
-                history_rows_html = ""
-                if p_att.empty:
-                    history_rows_html = '<div class="history-empty-text">まだ演習履歴がありません</div>'
-                else:
-                    p_att = p_att.sort_values(by=["attempt_date", "attempt_id"], ascending=[False, False])
-                    for _, att_row in p_att.iterrows():
-                        att_date_s = html.escape(str(att_row["attempt_date"]))
-                        try:
-                            is_corr = int(float(att_row["is_correct"])) == 1
-                        except (ValueError, TypeError):
-                            is_corr = False
+                    history_rows_html = ""
+                    if p_att.empty:
+                        history_rows_html = '<div class="history-empty-text">まだ演習履歴がありません</div>'
+                    else:
+                        p_att = p_att.sort_values(by=["attempt_date", "attempt_id"], ascending=[False, False])
+                        for _, att_row in p_att.iterrows():
+                            att_date_s = html.escape(str(att_row["attempt_date"]))
+                            try:
+                                is_corr = int(float(att_row["is_correct"])) == 1
+                            except (ValueError, TypeError):
+                                is_corr = False
 
-                        corr_badge = '<span class="badge-pass">◯ 正解</span>' if is_corr else '<span class="badge-fail">✕ 不正解</span>'
+                            corr_badge = '<span class="badge-pass">◯ 正解</span>' if is_corr else '<span class="badge-fail">✕ 不正解</span>'
 
-                        memo_raw = str(att_row["memo"]).strip() if pd.notna(att_row["memo"]) else ""
-                        memo_html = ""
-                        if memo_raw and memo_raw.lower() != "nan" and memo_raw != "None":
-                            memo_html = f'<div class="history-memo-box">📝 {html.escape(memo_raw)}</div>'
+                            memo_raw = str(att_row["memo"]).strip() if pd.notna(att_row["memo"]) else ""
+                            memo_html = ""
+                            if memo_raw and memo_raw.lower() != "nan" and memo_raw != "None":
+                                memo_html = f'<div class="history-memo-box">📝 {html.escape(memo_raw)}</div>'
 
-                        history_rows_html += f"""
-                        <div class="history-row">
-                            <div class="history-meta-line">
-                                <span class="history-date">{att_date_s}</span>
-                                {corr_badge}
+                            history_rows_html += f"""
+                            <div class="history-row">
+                                <div class="history-meta-line">
+                                    <span class="history-date">{att_date_s}</span>
+                                    {corr_badge}
+                                </div>
+                                {memo_html}
                             </div>
-                            {memo_html}
-                        </div>
-                        """
+                            """
 
-                cards_html += f"""
+                    cards_html += f"""
 <details class="nintendo-accordion">
 <summary class="nintendo-card-summary">
 <div>
 <div class="card-top">
 <span class="tag-subject">[{p_id_s}] {subject_s}</span>
-<div class="tag-meta-group">
-<span class="tag-group">📁 {group_s}</span>
 <span class="tag-unit">{unit_s}</span>
-</div>
 </div>
 <div class="card-title">{title_s}</div>
 </div>
@@ -745,7 +833,7 @@ if load_success:
 {status_badge}
 </div>
 <div class="toggle-hint-bar">
-<span>タップして演習履歴・メモを見る</span>
+<span>タップして演習履歴・メモ・操作を見る</span>
 <span class="toggle-icon">▼</span>
 </div>
 </div>
@@ -756,10 +844,41 @@ if load_success:
 </div>
 </details>
 """
-            cards_html += '\n</div>'
+                cards_html += '\n</div>'
+                clean_cards_html = "\n".join(line.strip() for line in cards_html.splitlines())
+                st.markdown(clean_cards_html, unsafe_allow_html=True)
 
-            clean_cards_html = "\n".join(line.strip() for line in cards_html.splitlines())
-            st.markdown(clean_cards_html, unsafe_allow_html=True)
+            # --- 問題の移動（Move Action）クイックパネル ---
+            st.write("---")
+            with st.expander("📂 問題を別のフォルダへ移動する"):
+                p_move_options = {
+                    f"[{row['problem_id']}] {row['title']}": row['problem_id']
+                    for _, row in current_problems.iterrows()
+                } if not current_problems.empty else {}
+
+                if not p_move_options:
+                    st.caption("このフォルダに移動可能な問題はありません。")
+                else:
+                    sel_mv_label = st.selectbox("移動させる問題", list(p_move_options.keys()))
+                    sel_mv_id = p_move_options[sel_mv_label]
+
+                    # 移動先候補一覧
+                    dest_candidates = sorted(list(all_known_paths))
+                    mv_mode = st.radio("移動先の指定方法", ["既存フォルダから選択", "新しいパスを直接入力"], horizontal=True)
+                    if mv_mode == "既存フォルダから選択":
+                        dest_folder = st.selectbox("移動先フォルダ", dest_candidates)
+                    else:
+                        dest_folder = st.text_input("移動先フォルダパス（例: /電磁気学/ビオ・サバールの法則）")
+
+                    if st.button("この問題を指定フォルダへ移動"):
+                        clean_dest = "/" + dest_folder.strip("/") if dest_folder.strip("/") else "/"
+                        try:
+                            problems_df.loc[problems_df["problem_id"] == sel_mv_id, "folder_path"] = clean_dest
+                            save_problems_df(problems_df)
+                            st.success(f"問題 [{sel_mv_id}] を `{clean_dest}` へ移動しました。")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"移動中にエラーが発生しました: {ex}")
 
     # -----------------------------------------------------------------------------
     # タブ 2: 演習ログ登録
@@ -781,7 +900,7 @@ if load_success:
                 (problems_df["subject"] == selected_sub) & (problems_df["unit"] == selected_unit)
             ]
             problem_options = {
-                f"[{row['problem_id']}] {row['title']} (📁 {row.get('group_name', 'デフォルト')})": row['problem_id']
+                f"[{row['problem_id']}] {row['title']} (📁 {row.get('folder_path', '/')})": row['problem_id']
                 for _, row in selectable_problems.iterrows()
             }
             selected_label = st.selectbox("問題", list(problem_options.keys()))
@@ -827,7 +946,7 @@ if load_success:
     with tab_manage:
         sub_action = st.radio(
             "操作を選択",
-            ["問題の新規作成", "グループ名の一括編集", "演習履歴の編集・削除", "問題マスタの編集・削除"],
+            ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
             horizontal=True
         )
         st.write("---")
@@ -835,7 +954,7 @@ if load_success:
         if sub_action == "問題の新規作成":
             st.subheader("新規問題の追加")
             existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
-            existing_groups = list(problems_df["group_name"].unique()) if not problems_df.empty and "group_name" in problems_df.columns else []
+            all_known_paths = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders)))
 
             new_id = st.text_input("問題ID（例: EM-001）")
             sub_mode = st.radio("科目の指定方法", ["既存から選択", "新規入力"], horizontal=True)
@@ -844,11 +963,15 @@ if load_success:
             else:
                 new_subject = st.text_input("新規科目名")
 
-            grp_mode = st.radio("グループ（分類）の指定方法", ["既存から選択", "新規入力"], horizontal=True)
-            if grp_mode == "既存から選択" and existing_groups:
-                new_group = st.selectbox("既存のグループ", existing_groups)
+            # 配置フォルダの選択（現在開いているフォルダをデフォルト提示）
+            f_mode = st.radio("配置フォルダの指定", ["現在のフォルダに配置", "既存から選択", "新規パス入力"], horizontal=True)
+            if f_mode == "現在のフォルダに配置":
+                target_f_path = st.session_state.current_folder
+                st.caption(f"配置先: `{target_f_path}`")
+            elif f_mode == "既存から選択":
+                target_f_path = st.selectbox("フォルダを選択", all_known_paths)
             else:
-                new_group = st.text_input("新規グループ名（例: 電磁気・静電場特訓）", value="デフォルト")
+                target_f_path = st.text_input("フォルダパス（例: /電磁気学/ガウスの法則）", value="/")
 
             new_unit = st.text_input("単元名（例: ガウスの法則）")
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
@@ -857,6 +980,7 @@ if load_success:
             if st.button("問題をカタログに追加"):
                 if new_id and new_subject and new_unit and new_title:
                     clean_id = new_id.strip()
+                    clean_path = "/" + target_f_path.strip("/") if target_f_path.strip("/") else "/"
                     if not problems_df.empty and clean_id in problems_df["problem_id"].values:
                         st.error("その問題IDは既に存在しています。")
                     else:
@@ -864,45 +988,18 @@ if load_success:
                             new_problem = pd.DataFrame([{
                                 "problem_id": clean_id,
                                 "subject": new_subject.strip(),
-                                "group_name": new_group.strip() if new_group else "デフォルト",
+                                "folder_path": clean_path,
                                 "unit": new_unit.strip(),
                                 "title": new_title.strip()
                             }])
                             updated_problems = pd.concat([problems_df, new_problem], ignore_index=True)
                             save_problems_df(updated_problems)
-                            st.success(f"問題 [{clean_id}] を追加しました。")
+                            st.success(f"問題 [{clean_id}] を `{clean_path}` に追加しました。")
                             st.rerun()
                         except Exception as ex:
                             st.error(f"追加中にエラーが発生しました: {ex}")
                 else:
                     st.error("すべての必須項目を入力してください。")
-
-        elif sub_action == "グループ名の一括編集":
-            st.subheader("グループ名の一括変更（Batch Rename）")
-            if problems_df.empty:
-                st.info("登録済みの問題がありません。")
-            else:
-                all_groups = sorted(list(problems_df["group_name"].unique()))
-                target_grp = st.selectbox("変更するグループを選択", all_groups)
-
-                # 対象グループに属する問題数を表示
-                matched_count = len(problems_df[problems_df["group_name"] == target_grp])
-                st.caption(f"現在の所属問題数: {matched_count} 件")
-
-                new_grp_name = st.text_input("新しいグループ名を入力", value=target_grp)
-
-                st.write("")
-                if st.button("このグループ名を一括更新する"):
-                    if new_grp_name.strip() and new_grp_name.strip() != target_grp:
-                        try:
-                            problems_df.loc[problems_df["group_name"] == target_grp, "group_name"] = new_grp_name.strip()
-                            save_problems_df(problems_df)
-                            st.success(f"グループ名を「{target_grp}」から「{new_grp_name.strip()}」へ一括変更しました（{matched_count}件反映）。")
-                            st.rerun()
-                        except Exception as ex:
-                            st.error(f"更新中にエラーが発生しました: {ex}")
-                    else:
-                        st.warning("異なる新しいグループ名を入力してください。")
 
         elif sub_action == "演習履歴の編集・削除":
             st.subheader("演習履歴の修正・削除")
@@ -974,7 +1071,7 @@ if load_success:
                 st.info("登録済みの問題がありません。")
             else:
                 p_choices = {
-                    f"[{row['problem_id']}] {row['subject']} - {row['title']} (📁 {row.get('group_name', 'デフォルト')})": str(row['problem_id'])
+                    f"[{row['problem_id']}] {row['subject']} - {row['title']} (📁 {row.get('folder_path', '/')})": str(row['problem_id'])
                     for _, row in problems_df.iterrows()
                 }
                 selected_p_label = st.selectbox("修正対象の問題", list(p_choices.keys()))
@@ -982,7 +1079,7 @@ if load_success:
                 target_p = problems_df[problems_df["problem_id"] == selected_p_id].iloc[0]
 
                 edit_subject = st.text_input("科目名", value=target_p["subject"])
-                edit_group = st.text_input("グループ名", value=target_p.get("group_name", "デフォルト"))
+                edit_folder = st.text_input("フォルダパス", value=target_p.get("folder_path", "/"))
                 edit_unit = st.text_input("単元名", value=target_p["unit"])
                 edit_title = st.text_input("問題名", value=target_p["title"])
 
@@ -993,7 +1090,7 @@ if load_success:
                         try:
                             p_idx = problems_df[problems_df["problem_id"] == selected_p_id].index
                             problems_df.loc[p_idx, "subject"] = edit_subject.strip()
-                            problems_df.loc[p_idx, "group_name"] = edit_group.strip()
+                            problems_df.loc[p_idx, "folder_path"] = "/" + edit_folder.strip("/") if edit_folder.strip("/") else "/"
                             problems_df.loc[p_idx, "unit"] = edit_unit.strip()
                             problems_df.loc[p_idx, "title"] = edit_title.strip()
                             save_problems_df(problems_df)
