@@ -159,30 +159,6 @@ st.markdown("""
         color: #1A1A1A;
     }
 
-    /* エクスプローラー パンくずナビゲーション */
-    .breadcrumb-container {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        background: #FFFFFF;
-        border: 1px solid #E5E7EB;
-        border-radius: 12px;
-        padding: 8px 14px;
-        margin-bottom: 14px;
-        overflow-x: auto;
-        white-space: nowrap;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-    }
-    .breadcrumb-segment {
-        font-size: 13px;
-        font-weight: 700;
-        color: #4B5563;
-    }
-    .breadcrumb-arrow {
-        color: #9CA3AF;
-        font-size: 12px;
-    }
-
     /* フォルダカードボタンスタイル */
     div.folder-btn > button {
         background: #FFFFFF !important;
@@ -559,7 +535,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# セッション状態（現在閲覧中のフォルダ階層と空フォルダキャッシュ）
+# セッション状態
 if "current_folder" not in st.session_state:
     st.session_state.current_folder = "/"
 if "created_folders" not in st.session_state:
@@ -655,7 +631,6 @@ if load_success:
             curr = st.session_state.current_folder
             parts = [p for p in curr.strip("/").split("/") if p]
 
-            # パンくずUI表示
             b_cols = st.columns(len(parts) + 2)
             with b_cols[0]:
                 if st.button("🏠 ホーム", key="bc_root", use_container_width=True):
@@ -670,24 +645,71 @@ if load_success:
                         st.session_state.current_folder = acc_path
                         st.rerun()
 
-            # 現在のパス表示バー
             st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
 
-            # --- フォルダ操作ツールバー ---
-            with st.expander("➕ 新しいフォルダを作成"):
-                new_folder_name = st.text_input("フォルダ名（例: ビオ・サバールの法則）")
-                if st.button("この階層に作成"):
-                    if new_folder_name.strip():
-                        target_dir = posixpath.join(st.session_state.current_folder, new_folder_name.strip())
-                        st.session_state.created_folders.add(target_dir)
-                        st.success(f"フォルダ「{new_folder_name.strip()}」を作成しました。")
-                        st.rerun()
+            # 全フォルダパスの抽出
+            all_known_paths = sorted(list(set(data["folder_path"].unique()).union(st.session_state.created_folders)))
+            current_problems = data[data["folder_path"] == curr].copy()
+
+            # =========================================================================
+            # ★【上部ツールバー】問題移動 & フォルダ作成クイックパネル
+            # =========================================================================
+            with st.expander("🛠️ フォルダ操作・問題の移動（上部ツールバー）", expanded=False):
+                tb_action = st.radio("操作を選択", ["📂 問題を別のフォルダへ移動", "➕ 新しいフォルダを作成"], horizontal=True)
+
+                if tb_action == "📂 問題を別のフォルダへ移動":
+                    # 対象問題の選択モード（現在のフォルダ内、または全問題）
+                    p_scope = st.radio("移動対象の絞り込み", ["現在のフォルダ内の問題", "全フォルダの問題から選択"], horizontal=True)
+
+                    if p_scope == "現在のフォルダ内の問題":
+                        candidate_df = current_problems
                     else:
-                        st.warning("フォルダ名を入力してください。")
+                        candidate_df = data
 
-            # --- ディレクトリ解析（直下のサブフォルダ & 問題の抽出） ---
-            all_known_paths = set(data["folder_path"].unique()).union(st.session_state.created_folders)
+                    if candidate_df.empty:
+                        st.caption("移動対象となる問題が存在しません。")
+                    else:
+                        p_move_options = {
+                            f"[{row['problem_id']}] {row['title']} (現在: {row.get('folder_path', '/')})": row['problem_id']
+                            for _, row in candidate_df.iterrows()
+                        }
+                        sel_mv_label = st.selectbox("移動させる問題を選択", list(p_move_options.keys()))
+                        sel_mv_id = p_move_options[sel_mv_label]
 
+                        col_dest1, col_dest2 = st.columns(2)
+                        with col_dest1:
+                            mv_dest_mode = st.radio("移動先の指定", ["既存フォルダから選択", "新規パス入力"], horizontal=True)
+                        with col_dest2:
+                            if mv_dest_mode == "既存フォルダから選択":
+                                dest_folder = st.selectbox("移動先フォルダ", all_known_paths)
+                            else:
+                                dest_folder = st.text_input("新規フォルダパス（例: /電磁気学/ガウスの法則）", value="/")
+
+                        st.write("")
+                        if st.button("🚀 この問題を移動する", key="btn_move_upper"):
+                            clean_dest = "/" + dest_folder.strip("/") if dest_folder.strip("/") else "/"
+                            try:
+                                problems_df.loc[problems_df["problem_id"] == sel_mv_id, "folder_path"] = clean_dest
+                                save_problems_df(problems_df)
+                                st.success(f"問題 [{sel_mv_id}] を `{clean_dest}` へ移動しました。")
+                                st.rerun()
+                            except Exception as ex:
+                                st.error(f"移動中にエラーが発生しました: {ex}")
+
+                elif tb_action == "➕ 新しいフォルダを作成":
+                    new_folder_name = st.text_input("新規フォルダ名（例: ビオ・サバールの法則）")
+                    if st.button("この階層に作成", key="btn_create_folder_upper"):
+                        if new_folder_name.strip():
+                            target_dir = posixpath.join(st.session_state.current_folder, new_folder_name.strip())
+                            st.session_state.created_folders.add(target_dir)
+                            st.success(f"フォルダ「{new_folder_name.strip()}」を作成しました。")
+                            st.rerun()
+                        else:
+                            st.warning("フォルダ名を入力してください。")
+
+            st.write("")
+
+            # --- 直下のサブフォルダ一覧の解析 & 表示 ---
             sub_folders = set()
             for p in all_known_paths:
                 p_clean = "/" + p.strip("/") if p.strip("/") else "/"
@@ -697,16 +719,11 @@ if load_success:
                     sub_folders.add(direct_child)
             sub_folders = sorted(list(sub_folders))
 
-            # 直下の問題を取得
-            current_problems = data[data["folder_path"] == curr].copy()
-
-            # --- 1. サブフォルダ一覧の表示 ---
             if sub_folders:
                 st.write("**📁 フォルダ**")
                 f_cols = st.columns(2)
                 for f_idx, s_folder in enumerate(sub_folders):
                     next_path = posixpath.join(curr, s_folder)
-                    # そのフォルダ以下にある問題数を集計
                     count_in_sub = len(data[data["folder_path"].str.startswith(next_path)])
                     col_target = f_cols[f_idx % 2]
                     with col_target:
@@ -717,13 +734,12 @@ if load_success:
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-            # --- 2. 問題カード一覧の表示 ---
+            # --- 問題カード一覧の表示 ---
             if current_problems.empty and not sub_folders:
-                st.info("このフォルダには問題やサブフォルダがありません。マスタ管理から問題を追加するか、移動してください。")
+                st.info("このフォルダには問題やサブフォルダがありません。上部ツールバーから問題を移動するか、マスタ管理から追加してください。")
             elif not current_problems.empty:
                 st.write(f"**📄 問題一覧（{len(current_problems)}問）**")
 
-                # 並び替えフィルター
                 sort_metric = st.selectbox(
                     "並び替え基準",
                     ["復習優先（経過日数が長い順）", "弱点克服（正答率が低い順）", "問題ID順", "演習回数が少ない順"]
@@ -773,7 +789,6 @@ if load_success:
                         status_badge = '<span class="safe-pill">定着中</span>'
                         elapsed_text = f"{int(r['elapsed_days'])}日前"
 
-                    # 該当問題の演習履歴を抽出
                     if not attempts_df.empty:
                         p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy()
                     else:
@@ -833,7 +848,7 @@ if load_success:
 {status_badge}
 </div>
 <div class="toggle-hint-bar">
-<span>タップして演習履歴・メモ・操作を見る</span>
+<span>タップして演習履歴・メモを見る</span>
 <span class="toggle-icon">▼</span>
 </div>
 </div>
@@ -847,38 +862,6 @@ if load_success:
                 cards_html += '\n</div>'
                 clean_cards_html = "\n".join(line.strip() for line in cards_html.splitlines())
                 st.markdown(clean_cards_html, unsafe_allow_html=True)
-
-            # --- 問題の移動（Move Action）クイックパネル ---
-            st.write("---")
-            with st.expander("📂 問題を別のフォルダへ移動する"):
-                p_move_options = {
-                    f"[{row['problem_id']}] {row['title']}": row['problem_id']
-                    for _, row in current_problems.iterrows()
-                } if not current_problems.empty else {}
-
-                if not p_move_options:
-                    st.caption("このフォルダに移動可能な問題はありません。")
-                else:
-                    sel_mv_label = st.selectbox("移動させる問題", list(p_move_options.keys()))
-                    sel_mv_id = p_move_options[sel_mv_label]
-
-                    # 移動先候補一覧
-                    dest_candidates = sorted(list(all_known_paths))
-                    mv_mode = st.radio("移動先の指定方法", ["既存フォルダから選択", "新しいパスを直接入力"], horizontal=True)
-                    if mv_mode == "既存フォルダから選択":
-                        dest_folder = st.selectbox("移動先フォルダ", dest_candidates)
-                    else:
-                        dest_folder = st.text_input("移動先フォルダパス（例: /電磁気学/ビオ・サバールの法則）")
-
-                    if st.button("この問題を指定フォルダへ移動"):
-                        clean_dest = "/" + dest_folder.strip("/") if dest_folder.strip("/") else "/"
-                        try:
-                            problems_df.loc[problems_df["problem_id"] == sel_mv_id, "folder_path"] = clean_dest
-                            save_problems_df(problems_df)
-                            st.success(f"問題 [{sel_mv_id}] を `{clean_dest}` へ移動しました。")
-                            st.rerun()
-                        except Exception as ex:
-                            st.error(f"移動中にエラーが発生しました: {ex}")
 
     # -----------------------------------------------------------------------------
     # タブ 2: 演習ログ登録
@@ -963,7 +946,6 @@ if load_success:
             else:
                 new_subject = st.text_input("新規科目名")
 
-            # 配置フォルダの選択（現在開いているフォルダをデフォルト提示）
             f_mode = st.radio("配置フォルダの指定", ["現在のフォルダに配置", "既存から選択", "新規パス入力"], horizontal=True)
             if f_mode == "現在のフォルダに配置":
                 target_f_path = st.session_state.current_folder
