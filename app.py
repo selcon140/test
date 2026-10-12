@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+import altair as alt
 import base64
 import html
 import json
@@ -151,7 +152,6 @@ def get_todos_df() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def get_books_df() -> pd.DataFrame:
-    """参考書マスタ（books シート）を取得"""
     try:
         conn = get_connection()
         df = conn.read(worksheet="books")
@@ -168,7 +168,6 @@ def get_books_df() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def get_book_logs_df() -> pd.DataFrame:
-    """参考書進捗ログ（book_logs シート）を取得"""
     try:
         conn = get_connection()
         df = conn.read(worksheet="book_logs")
@@ -694,15 +693,6 @@ st.markdown("""
         color: #9CA3AF;
     }
 
-    .book-panel {
-        background: #FFFFFF;
-        border-radius: 18px;
-        border: 1px solid #ECECEC;
-        padding: 22px;
-        margin-bottom: 16px;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.03);
-    }
-
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -1029,7 +1019,7 @@ if load_success:
                 st.markdown(clean_cards_html, unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------------
-    # タブ 2: 参考書進捗管理（New Feature）
+    # タブ 2: 参考書進捗管理（グラフ見切れ解消 & Altair 統合）
     # -----------------------------------------------------------------------------
     with tab_books:
         st.subheader("参考書・テキスト進行度管理")
@@ -1045,14 +1035,12 @@ if load_success:
             selected_book_id = book_options[selected_book_label]
             target_book = books_df[books_df["book_id"] == selected_book_id].iloc[0]
 
-            # 基本スペック
             total_pg = int(pd.to_numeric(target_book.get("total_pages", 0), errors="coerce") or 1)
             curr_pg = int(pd.to_numeric(target_book.get("current_pages", 0), errors="coerce") or 0)
             curr_pg = min(curr_pg, total_pg)
             remain_pg = max(total_pg - curr_pg, 0)
             rate = round((curr_pg / total_pg) * 100, 1)
 
-            # サマリー指標カード
             b_summary_html = f"""
             <div class="summary-grid">
                 <div class="summary-card primary">
@@ -1071,13 +1059,11 @@ if load_success:
             """
             st.markdown("\n".join(line.strip() for line in b_summary_html.splitlines()), unsafe_allow_html=True)
 
-            # 大型プログレスバー
             st.write(f"**全体進捗（{curr_pg} / {total_pg} ページ完了）**")
             st.progress(rate / 100.0)
 
             # --- 進捗追記フォーム ---
             with st.expander("✏️ 進捗を追記・記録する", expanded=False):
-                # 階層定義の解析
                 struct_raw = str(target_book.get("structure_json", "[]")).strip()
                 try:
                     struct_data = json.loads(struct_raw) if struct_raw else []
@@ -1128,12 +1114,10 @@ if load_success:
                         new_curr = min(int(pages_input), total_pg)
                         added_pages = max(new_curr - curr_pg, 0)
 
-                    # 1. books テーブルの更新
                     b_idx = books_df[books_df["book_id"] == selected_book_id].index
                     books_df.loc[b_idx, "current_pages"] = new_curr
                     save_books_df(books_df)
 
-                    # 2. book_logs テーブルの追加
                     if book_logs_df.empty or "log_id" not in book_logs_df.columns:
                         next_log_id = 1
                     else:
@@ -1156,21 +1140,52 @@ if load_success:
                     st.success(f"進捗を記録しました（現在: {new_curr} / {total_pg} p）")
                     st.rerun()
 
-            # --- グラフ表示（進捗推移チャート） ---
+            # --- ★ 改善箇所: 縦軸見切れ解消 & Altair 高精度チャート ---
             st.write("---")
             st.write("**📈 読破ページ数の推移（Cumulative progress）**")
 
             target_logs = book_logs_df[book_logs_df["book_id"] == selected_book_id].copy() if not book_logs_df.empty else pd.DataFrame()
             if not target_logs.empty:
                 target_logs["log_date"] = pd.to_datetime(target_logs["log_date"])
-                target_logs["cumulative_page"] = pd.to_numeric(target_logs["cumulative_page"], errors="coerce").fillna(0)
+                target_logs["cumulative_page"] = pd.to_numeric(target_logs["cumulative_page"], errors="coerce").fillna(0).astype(int)
+
                 chart_df = target_logs.sort_values(by="log_date").groupby(target_logs["log_date"].dt.strftime("%Y-%m-%d"))["cumulative_page"].max().reset_index()
-                chart_df = chart_df.rename(columns={"log_date": "日付", "cumulative_page": "到達ページ数"})
-                st.line_chart(chart_df.set_index("日付"), use_container_width=True)
+                chart_df.columns = ["日付", "到達ページ数"]
+
+                # Y軸スケールを 0 〜 total_pg に固定
+                y_max_limit = max(total_pg, int(chart_df["到達ページ数"].max()) + 10)
+
+                # Altair チャート定義（左マージン minExtent=55 で見切れ完全防止）
+                base = alt.Chart(chart_df).encode(
+                    x=alt.X("日付:T", title="日付", axis=alt.Axis(format="%Y-%m-%d", labelAngle=-30)),
+                    y=alt.Y(
+                        "到達ページ数:Q",
+                        title="到達ページ数 (p)",
+                        scale=alt.Scale(domain=[0, y_max_limit], clamp=True),
+                        axis=alt.Axis(
+                            minExtent=55,      # ★ 左余白を十分に確保して縦軸数値の見切れを防止
+                            labelPadding=8,
+                            titlePadding=12,
+                            gridColor="#ECECEC"
+                        )
+                    )
+                )
+
+                # 折れ線とマーカーポイント（データ1点でも現在地が可視化される）
+                chart_lines = base.mark_line(color="#E60012", strokeWidth=3)
+                chart_points = base.mark_circle(size=70, color="#E60012")
+                final_chart = (chart_lines + chart_points).encode(
+                    tooltip=[
+                        alt.Tooltip("日付:T", title="記録日", format="%Y-%m-%d"),
+                        alt.Tooltip("到達ページ数:Q", title="到達ページ (p)")
+                    ]
+                ).properties(height=280)
+
+                st.altair_chart(final_chart, use_container_width=True)
             else:
                 st.caption("進捗ログが蓄積されると、ここに時系列の読破推移グラフが表示されます。")
 
-            # --- 章・単元ごとの進行度ブレイクダウン ---
+            # --- 章・単元構成の表示 ---
             struct_raw = str(target_book.get("structure_json", "[]")).strip()
             try:
                 struct_data = json.loads(struct_raw) if struct_raw else []
@@ -1230,7 +1245,6 @@ if load_success:
                     if not books_df.empty and clean_b_id in books_df["book_id"].values:
                         st.error("その参考書IDは既に登録されています。")
                     else:
-                        # JSON構文の検証
                         parsed_struct = []
                         if struct_input.strip():
                             try:
