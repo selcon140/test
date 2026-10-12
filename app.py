@@ -621,7 +621,6 @@ st.markdown("""
         word-break: break-all;
     }
 
-    /* ToDo & 参考書カードデザイン */
     .todo-card {
         background: #FFFFFF;
         border-radius: 16px;
@@ -1019,7 +1018,7 @@ if load_success:
                 st.markdown(clean_cards_html, unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------------
-    # タブ 2: 参考書進捗管理（グラフ見切れ解消 & Altair 統合）
+    # タブ 2: 参考書進捗管理
     # -----------------------------------------------------------------------------
     with tab_books:
         st.subheader("参考書・テキスト進行度管理")
@@ -1140,7 +1139,7 @@ if load_success:
                     st.success(f"進捗を記録しました（現在: {new_curr} / {total_pg} p）")
                     st.rerun()
 
-            # --- ★ 改善箇所: 縦軸見切れ解消 & Altair 高精度チャート ---
+            # --- 読破ページ数の推移チャート ---
             st.write("---")
             st.write("**📈 読破ページ数の推移（Cumulative progress）**")
 
@@ -1152,10 +1151,8 @@ if load_success:
                 chart_df = target_logs.sort_values(by="log_date").groupby(target_logs["log_date"].dt.strftime("%Y-%m-%d"))["cumulative_page"].max().reset_index()
                 chart_df.columns = ["日付", "到達ページ数"]
 
-                # Y軸スケールを 0 〜 total_pg に固定
                 y_max_limit = max(total_pg, int(chart_df["到達ページ数"].max()) + 10)
 
-                # Altair チャート定義（左マージン minExtent=55 で見切れ完全防止）
                 base = alt.Chart(chart_df).encode(
                     x=alt.X("日付:T", title="日付", axis=alt.Axis(format="%Y-%m-%d", labelAngle=-30)),
                     y=alt.Y(
@@ -1163,7 +1160,7 @@ if load_success:
                         title="到達ページ数 (p)",
                         scale=alt.Scale(domain=[0, y_max_limit], clamp=True),
                         axis=alt.Axis(
-                            minExtent=55,      # ★ 左余白を十分に確保して縦軸数値の見切れを防止
+                            minExtent=55,
                             labelPadding=8,
                             titlePadding=12,
                             gridColor="#ECECEC"
@@ -1171,7 +1168,6 @@ if load_success:
                     )
                 )
 
-                # 折れ線とマーカーポイント（データ1点でも現在地が可視化される）
                 chart_lines = base.mark_line(color="#E60012", strokeWidth=3)
                 chart_points = base.mark_circle(size=70, color="#E60012")
                 final_chart = (chart_lines + chart_points).encode(
@@ -1208,6 +1204,19 @@ if load_success:
                             u_pages = u_item.get("unit_pages", 0)
                             u_info = f" — {u_pages}p" if u_pages > 0 else ""
                             st.caption(f" └ 📄 {u_name}{u_info}")
+
+            # --- ★ 新設: 参考書をその場で削除するアコーディオン ---
+            st.write("---")
+            with st.expander("🗑️ この参考書を削除する", expanded=False):
+                st.warning(f"参考書「{target_book['title']}」および紐付いている進捗ログが完全に削除されます。よろしいですか？")
+                if st.button("この参考書を完全に削除する", key=f"btn_del_book_in_tab_{selected_book_id}"):
+                    updated_b = books_df[books_df["book_id"] != selected_book_id]
+                    save_books_df(updated_b)
+                    if not book_logs_df.empty:
+                        updated_bl = book_logs_df[book_logs_df["book_id"] != selected_book_id]
+                        save_book_logs_df(updated_bl)
+                    st.success(f"参考書「{target_book['title']}」を削除しました。")
+                    st.rerun()
 
         # --- 参考書新規登録パネル ---
         st.write("---")
@@ -1523,12 +1532,17 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 5: マスタ管理
+    # タブ 5: マスタ管理（参考書マスタの編集・削除を追加）
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
             "操作を選択",
-            ["新規問題の追加（複数ファイル添付対応）", "問題マスタ・添付ファイルの編集・削除", "演習履歴の編集・削除"],
+            [
+                "新規問題の追加（複数ファイル添付対応）",
+                "問題マスタ・添付ファイルの編集・削除",
+                "演習履歴の編集・削除",
+                "参考書マスタの編集・削除"
+            ],
             horizontal=True
         )
         st.write("---")
@@ -1743,4 +1757,60 @@ if load_success:
                         updated_att = attempts_df[attempts_df["attempt_id"].astype(str) != selected_att_id]
                         save_attempts_df(updated_att)
                         st.warning("履歴を削除しました。")
+                        st.rerun()
+
+        # --- ★ 新設: 参考書マスタの編集・削除サブアクション ---
+        elif sub_action == "参考書マスタの編集・削除":
+            st.subheader("参考書マスタの編集・削除")
+            if books_df.empty:
+                st.info("登録済みの参考書がありません。")
+            else:
+                b_choices = {
+                    f"[{row['book_id']}] {row['title']} ({row['subject']})": str(row['book_id'])
+                    for _, row in books_df.iterrows()
+                }
+                selected_b_label_m = st.selectbox("対象の参考書を選択", list(b_choices.keys()), key="sel_b_manage")
+                selected_b_id_m = b_choices[selected_b_label_m]
+                target_b_m = books_df[books_df["book_id"] == selected_b_id_m].iloc[0]
+
+                edit_b_title = st.text_input("参考書名", value=target_b_m["title"])
+                edit_b_subject = st.text_input("科目名", value=target_b_m["subject"])
+                edit_b_total = st.number_input(
+                    "総ページ数",
+                    min_value=1,
+                    max_value=5000,
+                    value=int(target_b_m["total_pages"]),
+                    step=10
+                )
+                edit_b_curr = st.number_input(
+                    "現在の到達ページ数",
+                    min_value=0,
+                    max_value=int(edit_b_total),
+                    value=int(target_b_m["current_pages"]),
+                    step=1
+                )
+
+                b_m_idx = books_df[books_df["book_id"] == selected_b_id_m].index
+
+                st.write("")
+                col_bsav, col_bdel = st.columns(2)
+                with col_bsav:
+                    if st.button("参考書情報を更新"):
+                        books_df.loc[b_m_idx, "title"] = edit_b_title.strip()
+                        books_df.loc[b_m_idx, "subject"] = edit_b_subject.strip()
+                        books_df.loc[b_m_idx, "total_pages"] = int(edit_b_total)
+                        books_df.loc[b_m_idx, "current_pages"] = int(edit_b_curr)
+                        save_books_df(books_df)
+                        st.success("参考書情報を更新しました。")
+                        st.rerun()
+
+                with col_bdel:
+                    if st.button("この参考書を完全に削除"):
+                        updated_b = books_df[books_df["book_id"] != selected_b_id_m]
+                        save_books_df(updated_b)
+                        # カスケード削除
+                        if not book_logs_df.empty:
+                            updated_bl = book_logs_df[book_logs_df["book_id"] != selected_b_id_m]
+                            save_book_logs_df(updated_bl)
+                        st.warning(f"参考書 [{selected_b_id_m}] および関連ログを削除しました。")
                         st.rerun()
