@@ -778,10 +778,10 @@ except Exception as e:
 
 if load_success:
     tab_catalog, tab_books, tab_todo, tab_entry, tab_manage = st.tabs([
-        "📁 エクスプローラー", 
-        "📖 参考書進捗", 
-        "✅ ToDoタスク", 
-        "✏️ 演習記録", 
+        "📁 エクスプローラー",
+        "📖 参考書進捗",
+        "✅ ToDoタスク",
+        "✏️ 演習記録",
         "⚙️ マスタ管理"
     ])
 
@@ -855,16 +855,20 @@ if load_success:
                 st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
 
             all_known_paths = sorted(list(set(data["folder_path"].unique()).union(st.session_state.created_folders)))
-            
+
             # 対象問題の抽出（全展開モードなら全データ、通常なら直下のみ）
             if is_all_view:
                 current_problems = data.copy()
             else:
                 current_problems = data[data["folder_path"] == curr].copy()
 
-            # 上部ツールバー（フォルダ操作・移動）
+                # 上部ツールバー（フォルダ操作・移動）
             with st.expander("🛠️ フォルダ操作・問題の移動（上部ツールバー）", expanded=False):
-                tb_action = st.radio("操作を選択", ["📂 問題を別のフォルダへ移動", "➕ 新しいフォルダを作成"], horizontal=True)
+                tb_action = st.radio(
+                    "操作を選択",
+                    ["📂 問題を別のフォルダへ移動", "📁 フォルダを別のフォルダへ移動", "➕ 新しいフォルダを作成"],
+                    horizontal=True
+                )
 
                 if tb_action == "📂 問題を別のフォルダへ移動":
                     p_scope = st.radio("移動対象の絞り込み", ["現在の表示内の問題", "全問題から選択"], horizontal=True)
@@ -899,6 +903,56 @@ if load_success:
                                 st.rerun()
                             except Exception as ex:
                                 st.error(f"移動エラー: {ex}")
+
+                elif tb_action == "📁 フォルダを別のフォルダへ移動":
+                    # ルート以外の移動可能フォルダを抽出
+                    movable_folders = [p for p in all_known_paths if p != "/"]
+                    if not movable_folders:
+                        st.caption("移動可能なフォルダが存在しません。先にフォルダを作成してください。")
+                    else:
+                        col_f_src, col_f_dest = st.columns(2)
+                        with col_f_src:
+                            src_folder = st.selectbox("移動させるフォルダ", movable_folders, key="sel_src_folder")
+                        with col_f_dest:
+                            # 自分自身を除外した候補一覧（ルート「/」を指定すればホーム直下に移動可能）
+                            dest_parent_candidates = [p for p in all_known_paths if p != src_folder]
+                            dest_parent = st.selectbox("移動先の親フォルダ", dest_parent_candidates, key="sel_dest_parent")
+
+                        st.write("")
+                        if st.button("🚀 フォルダを移動する", key="btn_move_folder"):
+                            # 循環参照（Cyclic reference）防止チェック
+                            if dest_parent.startswith(src_folder + "/"):
+                                st.error("自分の子フォルダ（内部階層）の中にフォルダを移動することはできません。")
+                            else:
+                                try:
+                                    folder_name = posixpath.basename(src_folder.rstrip("/"))
+                                    new_folder_path = posixpath.join(dest_parent, folder_name)
+
+                                    # 1. 配下の全問題の folder_path を再帰的（Recursive）に更新
+                                    def rewrite_path(old_p):
+                                        if old_p == src_folder:
+                                            return new_folder_path
+                                        elif old_p.startswith(src_folder + "/"):
+                                            return new_folder_path + old_p[len(src_folder):]
+                                        return old_p
+
+                                    problems_df["folder_path"] = problems_df["folder_path"].apply(rewrite_path)
+                                    save_problems_df(problems_df)
+
+                                    # 2. セッションの空フォルダリストも追従更新
+                                    new_created = set()
+                                    for p in st.session_state.created_folders:
+                                        new_created.add(rewrite_path(p))
+                                    st.session_state.created_folders = new_created
+
+                                    # 3. 現在開いている階層が移動対象だった場合は自動追従
+                                    if st.session_state.current_folder == src_folder or st.session_state.current_folder.startswith(src_folder + "/"):
+                                        st.session_state.current_folder = rewrite_path(st.session_state.current_folder)
+
+                                    st.success(f"フォルダ「{src_folder}」を「{new_folder_path}」へ移動しました。")
+                                    st.rerun()
+                                except Exception as ex:
+                                    st.error(f"フォルダ移動エラー: {ex}")
 
                 elif tb_action == "➕ 新しいフォルダを作成":
                     new_folder_name = st.text_input("新規フォルダ名（例: ビオ・サバールの法則）")
@@ -1029,7 +1083,7 @@ if load_success:
 
                     files_list = parse_attached_files(r.get("file_id", ""), r.get("file_name", ""))
                     file_badge = f'<span class="tag-file-badge">📎 資料 ({len(files_list)}件)</span>' if files_list else ""
-                    
+
                     # 全展開モード時は格納フォルダのパスバッジを表示
                     folder_pill_html = f'<span class="tag-folder-pill">📁 {folder_path_s}</span>' if is_all_view else ""
 
@@ -1209,7 +1263,7 @@ if load_success:
                     struct_data = []
 
                 chapter_names = [ch.get("chapter_name", "") for ch in struct_data if ch.get("chapter_name")]
-                
+
                 c_ch, c_un = st.columns(2)
                 with c_ch:
                     if chapter_names:
@@ -1286,7 +1340,7 @@ if load_success:
             if not target_logs.empty:
                 target_logs["log_date"] = pd.to_datetime(target_logs["log_date"])
                 target_logs["cumulative_page"] = pd.to_numeric(target_logs["cumulative_page"], errors="coerce").fillna(0).astype(int)
-                
+
                 chart_df = target_logs.sort_values(by="log_date").groupby(target_logs["log_date"].dt.strftime("%Y-%m-%d"))["cumulative_page"].max().reset_index()
                 chart_df.columns = ["日付", "到達ページ数"]
 
@@ -1295,7 +1349,7 @@ if load_success:
                 base = alt.Chart(chart_df).encode(
                     x=alt.X("日付:T", title="日付", axis=alt.Axis(format="%Y-%m-%d", labelAngle=-30)),
                     y=alt.Y(
-                        "到達ページ数:Q", 
+                        "到達ページ数:Q",
                         title="到達ページ数 (p)",
                         scale=alt.Scale(domain=[0, y_max_limit], clamp=True),
                         axis=alt.Axis(
@@ -1677,9 +1731,9 @@ if load_success:
         sub_action = st.radio(
             "操作を選択",
             [
-                "新規問題の追加（複数ファイル添付対応）", 
-                "問題マスタ・添付ファイルの編集・削除", 
-                "演習履歴の編集・削除", 
+                "新規問題の追加（複数ファイル添付対応）",
+                "問題マスタ・添付ファイルの編集・削除",
+                "演習履歴の編集・削除",
                 "参考書マスタの編集・削除"
             ],
             horizontal=True
@@ -1914,17 +1968,17 @@ if load_success:
                 edit_b_title = st.text_input("参考書名", value=target_b_m["title"])
                 edit_b_subject = st.text_input("科目名", value=target_b_m["subject"])
                 edit_b_total = st.number_input(
-                    "総ページ数", 
-                    min_value=1, 
-                    max_value=5000, 
-                    value=int(target_b_m["total_pages"]), 
+                    "総ページ数",
+                    min_value=1,
+                    max_value=5000,
+                    value=int(target_b_m["total_pages"]),
                     step=10
                 )
                 edit_b_curr = st.number_input(
-                    "現在の到達ページ数", 
-                    min_value=0, 
-                    max_value=int(edit_b_total), 
-                    value=int(target_b_m["current_pages"]), 
+                    "現在の到達ページ数",
+                    min_value=0,
+                    max_value=int(edit_b_total),
+                    value=int(target_b_m["current_pages"]),
                     step=1
                 )
 
