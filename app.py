@@ -12,15 +12,20 @@ def get_connection():
 
 @st.cache_data(ttl=60)
 def get_problems_df() -> pd.DataFrame:
-    """問題マスタ（problems シート）をキャッシュして取得"""
+    """問題マスタ（problems シート）をキャッシュして取得（group_name 列を自動補完）"""
     conn = get_connection()
     df = conn.read(worksheet="problems")
     if df is None or df.empty:
-        return pd.DataFrame(columns=["problem_id", "subject", "unit", "title"])
+        return pd.DataFrame(columns=["problem_id", "subject", "unit", "title", "group_name"])
     df = df.dropna(how="all")
     for col in ["problem_id", "subject", "unit", "title"]:
         if col not in df.columns:
             df[col] = ""
+    # group_name 列が存在しない場合は unit、または "デフォルト" で安全に補完
+    if "group_name" not in df.columns:
+        df["group_name"] = df["unit"].replace("", "デフォルト")
+    else:
+        df["group_name"] = df["group_name"].fillna("デフォルト").replace("", "デフォルト")
     df = df.astype(str)
     df = df[df["problem_id"].str.strip() != ""]
     return df
@@ -211,6 +216,7 @@ st.markdown("""
         border-radius: 3px 3px 0 0;
     }
 
+    /* サマリーカード */
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -244,6 +250,7 @@ st.markdown("""
         font-weight: 800;
     }
 
+    /* 問題カードグリッド */
     .cards-grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -301,6 +308,19 @@ st.markdown("""
         padding: 4px 10px;
         border-radius: 8px;
     }
+    .tag-meta-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .tag-group {
+        background-color: #FEE2E2;
+        color: #B91C1C;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 6px;
+    }
     .tag-unit {
         font-size: 13px;
         font-weight: 600;
@@ -314,6 +334,7 @@ st.markdown("""
         margin-bottom: 16px;
     }
 
+    /* 正答率バー */
     .progress-wrapper {
         margin-bottom: 14px;
     }
@@ -585,28 +606,41 @@ if load_success:
             """
             st.markdown("\n".join(line.strip() for line in summary_html.splitlines()), unsafe_allow_html=True)
 
-            col_f1, col_f2 = st.columns(2)
+            # 多段階絞り込み（科目・グループ・並び替え）
+            col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
                 subject_filter = st.selectbox(
                     "科目絞り込み",
                     ["全科目"] + sorted(list(data["subject"].unique()))
                 )
             with col_f2:
+                # 科目選択に連動したグループ一覧を抽出
+                if subject_filter == "全科目":
+                    available_groups = sorted(list(data["group_name"].unique()))
+                else:
+                    available_groups = sorted(list(data[data["subject"] == subject_filter]["group_name"].unique()))
+                group_filter = st.selectbox(
+                    "グループ絞り込み",
+                    ["全グループ"] + available_groups
+                )
+            with col_f3:
                 sort_metric = st.selectbox(
                     "並び替え基準",
-                    ["復習優先（未着手・経過日数が長い順）", "弱点克服（正答率が低い順）", "科目・単元順", "演習回数が少ない順"]
+                    ["復習優先（経過日数が長い順）", "弱点克服（正答率が低い順）", "グループ・単元順", "演習回数が少ない順"]
                 )
 
             filtered = data.copy()
             if subject_filter != "全科目":
                 filtered = filtered[filtered["subject"] == subject_filter]
+            if group_filter != "全グループ":
+                filtered = filtered[filtered["group_name"] == group_filter]
 
-            if sort_metric == "復習優先（未着手・経過日数が長い順）":
+            if sort_metric == "復習優先（経過日数が長い順）":
                 filtered = filtered.sort_values(by="elapsed_days", ascending=False, na_position="first")
             elif sort_metric == "弱点克服（正答率が低い順）":
                 filtered = filtered.sort_values(by="accuracy", ascending=True, na_position="last")
-            elif sort_metric == "科目・単元順":
-                filtered = filtered.sort_values(by=["subject", "unit", "problem_id"])
+            elif sort_metric == "グループ・単元順":
+                filtered = filtered.sort_values(by=["group_name", "unit", "problem_id"])
             elif sort_metric == "演習回数が少ない順":
                 filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
@@ -617,6 +651,7 @@ if load_success:
                 title_s = html.escape(str(r["title"]))
                 subject_s = html.escape(str(r["subject"]))
                 unit_s = html.escape(str(r["unit"]))
+                group_s = html.escape(str(r.get("group_name", "デフォルト")))
                 p_id_s = html.escape(p_id_raw)
 
                 if pd.isna(r["accuracy"]):
@@ -647,7 +682,7 @@ if load_success:
                     status_badge = '<span class="safe-pill">定着中</span>'
                     elapsed_text = f"{int(r['elapsed_days'])}日前"
 
-                # 該当問題の演習履歴を抽出・生成
+                # 該当問題の演習履歴を抽出
                 if not attempts_df.empty:
                     p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy()
                 else:
@@ -660,8 +695,6 @@ if load_success:
                     p_att = p_att.sort_values(by=["attempt_date", "attempt_id"], ascending=[False, False])
                     for _, att_row in p_att.iterrows():
                         att_date_s = html.escape(str(att_row["attempt_date"]))
-
-                        # ★ 校正箇所: 浮動小数点数（1.0）や文字列に対応した安全な正誤判定
                         try:
                             is_corr = int(float(att_row["is_correct"])) == 1
                         except (ValueError, TypeError):
@@ -690,7 +723,10 @@ if load_success:
 <div>
 <div class="card-top">
 <span class="tag-subject">[{p_id_s}] {subject_s}</span>
+<div class="tag-meta-group">
+<span class="tag-group">📁 {group_s}</span>
 <span class="tag-unit">{unit_s}</span>
+</div>
 </div>
 <div class="card-title">{title_s}</div>
 </div>
@@ -745,7 +781,7 @@ if load_success:
                 (problems_df["subject"] == selected_sub) & (problems_df["unit"] == selected_unit)
             ]
             problem_options = {
-                f"[{row['problem_id']}] {row['title']}": row['problem_id']
+                f"[{row['problem_id']}] {row['title']} (📁 {row.get('group_name', 'デフォルト')})": row['problem_id']
                 for _, row in selectable_problems.iterrows()
             }
             selected_label = st.selectbox("問題", list(problem_options.keys()))
@@ -791,7 +827,7 @@ if load_success:
     with tab_manage:
         sub_action = st.radio(
             "操作を選択",
-            ["問題の新規作成", "演習履歴の編集・削除", "問題マスタの編集・削除"],
+            ["問題の新規作成", "グループ名の一括編集", "演習履歴の編集・削除", "問題マスタの編集・削除"],
             horizontal=True
         )
         st.write("---")
@@ -799,6 +835,7 @@ if load_success:
         if sub_action == "問題の新規作成":
             st.subheader("新規問題の追加")
             existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
+            existing_groups = list(problems_df["group_name"].unique()) if not problems_df.empty and "group_name" in problems_df.columns else []
 
             new_id = st.text_input("問題ID（例: EM-001）")
             sub_mode = st.radio("科目の指定方法", ["既存から選択", "新規入力"], horizontal=True)
@@ -806,6 +843,12 @@ if load_success:
                 new_subject = st.selectbox("既存の科目", existing_subjects)
             else:
                 new_subject = st.text_input("新規科目名")
+
+            grp_mode = st.radio("グループ（分類）の指定方法", ["既存から選択", "新規入力"], horizontal=True)
+            if grp_mode == "既存から選択" and existing_groups:
+                new_group = st.selectbox("既存のグループ", existing_groups)
+            else:
+                new_group = st.text_input("新規グループ名（例: 電磁気・静電場特訓）", value="デフォルト")
 
             new_unit = st.text_input("単元名（例: ガウスの法則）")
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
@@ -821,6 +864,7 @@ if load_success:
                             new_problem = pd.DataFrame([{
                                 "problem_id": clean_id,
                                 "subject": new_subject.strip(),
+                                "group_name": new_group.strip() if new_group else "デフォルト",
                                 "unit": new_unit.strip(),
                                 "title": new_title.strip()
                             }])
@@ -832,6 +876,33 @@ if load_success:
                             st.error(f"追加中にエラーが発生しました: {ex}")
                 else:
                     st.error("すべての必須項目を入力してください。")
+
+        elif sub_action == "グループ名の一括編集":
+            st.subheader("グループ名の一括変更（Batch Rename）")
+            if problems_df.empty:
+                st.info("登録済みの問題がありません。")
+            else:
+                all_groups = sorted(list(problems_df["group_name"].unique()))
+                target_grp = st.selectbox("変更するグループを選択", all_groups)
+
+                # 対象グループに属する問題数を表示
+                matched_count = len(problems_df[problems_df["group_name"] == target_grp])
+                st.caption(f"現在の所属問題数: {matched_count} 件")
+
+                new_grp_name = st.text_input("新しいグループ名を入力", value=target_grp)
+
+                st.write("")
+                if st.button("このグループ名を一括更新する"):
+                    if new_grp_name.strip() and new_grp_name.strip() != target_grp:
+                        try:
+                            problems_df.loc[problems_df["group_name"] == target_grp, "group_name"] = new_grp_name.strip()
+                            save_problems_df(problems_df)
+                            st.success(f"グループ名を「{target_grp}」から「{new_grp_name.strip()}」へ一括変更しました（{matched_count}件反映）。")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"更新中にエラーが発生しました: {ex}")
+                    else:
+                        st.warning("異なる新しいグループ名を入力してください。")
 
         elif sub_action == "演習履歴の編集・削除":
             st.subheader("演習履歴の修正・削除")
@@ -858,7 +929,6 @@ if load_success:
 
                 edit_date = st.date_input("日付を変更", value=def_date)
 
-                # ★ 校正箇所: 編集フォーム側の初期選択インデックスも浮動小数点数を考慮して安全に取得
                 try:
                     curr_is_corr = int(float(target_row["is_correct"])) == 1
                 except Exception:
@@ -904,7 +974,7 @@ if load_success:
                 st.info("登録済みの問題がありません。")
             else:
                 p_choices = {
-                    f"[{row['problem_id']}] {row['subject']} - {row['title']}": str(row['problem_id'])
+                    f"[{row['problem_id']}] {row['subject']} - {row['title']} (📁 {row.get('group_name', 'デフォルト')})": str(row['problem_id'])
                     for _, row in problems_df.iterrows()
                 }
                 selected_p_label = st.selectbox("修正対象の問題", list(p_choices.keys()))
@@ -912,6 +982,7 @@ if load_success:
                 target_p = problems_df[problems_df["problem_id"] == selected_p_id].iloc[0]
 
                 edit_subject = st.text_input("科目名", value=target_p["subject"])
+                edit_group = st.text_input("グループ名", value=target_p.get("group_name", "デフォルト"))
                 edit_unit = st.text_input("単元名", value=target_p["unit"])
                 edit_title = st.text_input("問題名", value=target_p["title"])
 
@@ -922,6 +993,7 @@ if load_success:
                         try:
                             p_idx = problems_df[problems_df["problem_id"] == selected_p_id].index
                             problems_df.loc[p_idx, "subject"] = edit_subject.strip()
+                            problems_df.loc[p_idx, "group_name"] = edit_group.strip()
                             problems_df.loc[p_idx, "unit"] = edit_unit.strip()
                             problems_df.loc[p_idx, "title"] = edit_title.strip()
                             save_problems_df(problems_df)
