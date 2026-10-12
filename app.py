@@ -1,6 +1,7 @@
 from datetime import date, datetime
 import base64
 import html
+import json
 import posixpath
 import requests
 import pandas as pd
@@ -63,6 +64,29 @@ def delete_file_from_drive(file_id: str):
         requests.post(gas_url, json=payload, timeout=30)
     except Exception as e:
         st.warning(f"Google ドライブ上の旧ファイル削除時に警告が発生しました: {e}")
+
+# -----------------------------------------------------------------------------
+# 添付ファイルデータ構造化・後方互換性ヘルパー
+# -----------------------------------------------------------------------------
+def parse_attached_files(raw_file_id: str, raw_file_name: str) -> list:
+    """単一ファイル（旧形式）と複数ファイル（JSON形式）を透過的にリストへ変換"""
+    if not raw_file_id or str(raw_file_id).lower() in ["nan", "none", ""]:
+        return []
+    val = str(raw_file_id).strip()
+    if val.startswith("[") and val.endswith("]"):
+        try:
+            return json.loads(val)
+        except Exception:
+            pass
+    # 旧形式（単一ファイルの ID とファイル名）
+    name = str(raw_file_name).strip() if (raw_file_name and str(raw_file_name).lower() not in ["nan", "none"]) else "添付資料"
+    return [{"id": val, "name": name}]
+
+def dump_attached_files(files_list: list) -> str:
+    """ファイルリストをスプレッドシート保存用 JSON 文字列に変換"""
+    if not files_list:
+        return ""
+    return json.dumps(files_list, ensure_ascii=False)
 
 @st.cache_data(ttl=60)
 def get_problems_df() -> pd.DataFrame:
@@ -460,27 +484,34 @@ st.markdown("""
         background: #FFFFFF;
         border: 1px solid #E5E7EB;
         border-radius: 12px;
-        padding: 12px;
+        padding: 14px;
         margin-bottom: 14px;
     }
-    .file-preview-title {
+    .file-preview-header {
         font-size: 13px;
         font-weight: 800;
         color: #1F2937;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
-    .file-btn-link {
+    .file-item-chip {
         display: inline-flex;
         align-items: center;
         gap: 6px;
         background-color: #2563EB;
         color: #FFFFFF !important;
         font-weight: 700;
-        font-size: 13px;
-        padding: 8px 14px;
+        font-size: 12px;
+        padding: 8px 12px;
         border-radius: 8px;
         text-decoration: none;
-        margin-top: 6px;
+        margin: 4px 6px 4px 0;
+        transition: background-color 0.2s ease;
+    }
+    .file-item-chip:hover {
+        background-color: #1D4ED8;
     }
     .history-header {
         font-size: 13px;
@@ -726,13 +757,13 @@ if load_success:
                     subject_s = html.escape(str(r["subject"]))
                     unit_s = html.escape(str(r["unit"]))
                     p_id_s = html.escape(p_id_raw)
-                    f_id_raw = str(r.get("file_id", "")).strip()
-                    f_name_raw = str(r.get("file_name", "")).strip()
 
+                    # 複数添付ファイルの解析
+                    files_list = parse_attached_files(r.get("file_id", ""), r.get("file_name", ""))
                     file_badge = ""
-                    if f_id_raw and f_id_raw.lower() not in ["nan", "none", ""]:
-                        is_pdf = f_name_raw.lower().endswith(".pdf")
-                        file_badge = f'<span class="tag-file-badge">{"📄 PDF" if is_pdf else "🖼️ 画像"}</span>'
+                    if files_list:
+                        num_f = len(files_list)
+                        file_badge = f'<span class="tag-file-badge">📎 資料 ({num_f}件)</span>'
 
                     if pd.isna(r["accuracy"]):
                         acc_text = "未実施"
@@ -757,30 +788,37 @@ if load_success:
                         status_badge = '<span class="safe-pill">定着中</span>'
                         elapsed_text = f"{int(r['elapsed_days'])}日前"
 
+                    # 複数添付ファイルの描画ブロック
                     file_block_html = ""
-                    if f_id_raw and f_id_raw.lower() not in ["nan", "none", ""]:
-                        is_pdf = f_name_raw.lower().endswith(".pdf")
-                        drive_view_url = f"https://drive.google.com/file/d/{f_id_raw}/view"
-                        drive_thumb_url = f"https://lh3.googleusercontent.com/d/{f_id_raw}"
+                    if files_list:
+                        chips_html = ""
+                        images_html = ""
+                        for f_item in files_list:
+                            f_id = f_item.get("id", "")
+                            f_name = f_item.get("name", "添付ファイル")
+                            is_pdf = f_name.lower().endswith(".pdf")
+                            drive_view_url = f"https://drive.google.com/file/d/{f_id}/view"
 
-                        if is_pdf:
-                            file_block_html = f"""
-                            <div class="file-preview-box">
-                                <div class="file-preview-title">📎 添付資料（PDF）: {html.escape(f_name_raw)}</div>
-                                <a href="{drive_view_url}" target="_blank" class="file-btn-link">📄 ドライブで PDF を開く</a>
-                            </div>
-                            """
-                        else:
-                            file_block_html = f"""
-                            <div class="file-preview-box">
-                                <div class="file-preview-title">📎 添付画像: {html.escape(f_name_raw)}</div>
-                                <div style="text-align:center; margin-bottom:8px;">
-                                    <img src="{drive_thumb_url}" style="max-width:100%; max-height:260px; border-radius:8px; border:1px solid #E5E7EB;" loading="lazy" />
+                            if is_pdf:
+                                chips_html += f'<a href="{drive_view_url}" target="_blank" class="file-item-chip">📄 {html.escape(f_name)}</a>'
+                            else:
+                                drive_thumb_url = f"https://lh3.googleusercontent.com/d/{f_id}"
+                                chips_html += f'<a href="{drive_view_url}" target="_blank" class="file-item-chip">🖼️ {html.escape(f_name)}</a>'
+                                images_html += f"""
+                                <div style="display:inline-block; margin:4px; text-align:center;">
+                                    <img src="{drive_thumb_url}" style="max-height:140px; max-width:200px; border-radius:6px; border:1px solid #E5E7EB;" loading="lazy" />
                                 </div>
-                                <a href="{drive_view_url}" target="_blank" class="file-btn-link">🔍 原寸大で開く</a>
-                            </div>
-                            """
+                                """
 
+                        file_block_html = f"""
+                        <div class="file-preview-box">
+                            <div class="file-preview-header">📎 添付資料（{len(files_list)}件）</div>
+                            <div style="margin-bottom:8px;">{chips_html}</div>
+                            {"<div style='margin-top:6px; overflow-x:auto; white-space:nowrap;'>" + images_html + "</div>" if images_html else ""}
+                        </div>
+                        """
+
+                    # 演習履歴
                     p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy() if not attempts_df.empty else pd.DataFrame()
                     history_rows_html = ""
                     if p_att.empty:
@@ -910,17 +948,17 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 3: マスタ管理（問題登録 & ファイル添付・更新・削除）
+    # タブ 3: マスタ管理（複数ファイル対応）
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
             "操作を選択",
-            ["新規問題の追加（ファイル添付対応）", "問題マスタ・添付ファイルの編集・削除", "演習履歴の編集・削除"],
+            ["新規問題の追加（複数ファイル添付対応）", "問題マスタ・添付ファイルの編集・削除", "演習履歴の編集・削除"],
             horizontal=True
         )
         st.write("---")
 
-        if sub_action == "新規問題の追加（ファイル添付対応）":
+        if sub_action == "新規問題の追加（複数ファイル添付対応）":
             st.subheader("新規問題の追加")
             existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
             all_known_paths = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders)))
@@ -936,10 +974,12 @@ if load_success:
             new_unit = st.text_input("単元名（例: ガウスの法則）")
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
 
+            # 複数ファイルアップロード対応
             st.write("---")
-            uploaded_file = st.file_uploader(
-                "📎 問題の図面・解答 PDF をアップロード（任意）",
-                type=["jpg", "jpeg", "png", "pdf"]
+            uploaded_files = st.file_uploader(
+                "📎 PDF や画像ファイルをアップロード（複数選択可）",
+                type=["jpg", "jpeg", "png", "pdf"],
+                accept_multiple_files=True
             )
 
             st.write("")
@@ -949,19 +989,23 @@ if load_success:
                     if not problems_df.empty and clean_id in problems_df["problem_id"].values:
                         st.error("その問題IDは既に存在しています。")
                     else:
-                        file_id = ""
-                        file_name = ""
                         target_drive_folder = st.secrets["connections"]["gsheets"].get("drive_folder_id", "")
+                        attached_list = []
 
-                        if uploaded_file and target_drive_folder:
-                            with st.spinner("Google ドライブへファイルをアップロード中..."):
-                                try:
-                                    uploaded_res = upload_file_to_drive(uploaded_file, target_drive_folder)
-                                    file_id = uploaded_res.get("id", "")
-                                    file_name = uploaded_file.name
-                                    st.success(f"ドライブへの保存が完了しました: {file_name}")
-                                except Exception as upload_err:
-                                    st.error(f"ファイル保存に失敗しました: {upload_err}")
+                        if uploaded_files and target_drive_folder:
+                            with st.spinner(f"ファイルを Google ドライブへ保存中（計 {len(uploaded_files)} 件）..."):
+                                for up_file in uploaded_files:
+                                    try:
+                                        uploaded_res = upload_file_to_drive(up_file, target_drive_folder)
+                                        attached_list.append({
+                                            "id": uploaded_res.get("id", ""),
+                                            "name": up_file.name
+                                        })
+                                    except Exception as up_err:
+                                        st.error(f"ファイル保存失敗 ({up_file.name}): {up_err}")
+
+                        file_id_val = dump_attached_files(attached_list)
+                        file_name_val = f"{len(attached_list)}件のファイル" if attached_list else ""
 
                         new_problem = pd.DataFrame([{
                             "problem_id": clean_id,
@@ -969,18 +1013,18 @@ if load_success:
                             "folder_path": target_f_path,
                             "unit": new_unit.strip(),
                             "title": new_title.strip(),
-                            "file_id": file_id,
-                            "file_name": file_name
+                            "file_id": file_id_val,
+                            "file_name": file_name_val
                         }])
                         updated_problems = pd.concat([problems_df, new_problem], ignore_index=True)
                         save_problems_df(updated_problems)
-                        st.success(f"問題 [{clean_id}] を登録しました。")
+                        st.success(f"問題 [{clean_id}] を登録しました（添付: {len(attached_list)} 件）。")
                         st.rerun()
                 else:
                     st.error("必須項目（ID、科目、単元、問題名）をすべて入力してください。")
 
         elif sub_action == "問題マスタ・添付ファイルの編集・削除":
-            st.subheader("問題定義の修正 & 添付ファイルの更新・削除")
+            st.subheader("問題定義の修正 & 添付ファイルの追加・個別削除")
             if problems_df.empty:
                 st.info("登録済みの問題がありません。")
             else:
@@ -998,58 +1042,66 @@ if load_success:
                 edit_title = st.text_input("問題名", value=target_p["title"])
 
                 st.write("---")
-                st.write("**📎 添付ファイルの管理**")
+                st.write("**📎 添付資料リスト（個別削除・閲覧）**")
 
-                curr_file_id = str(target_p.get("file_id", "")).strip()
-                curr_file_name = str(target_p.get("file_name", "")).strip()
-                has_file = bool(curr_file_id and curr_file_id.lower() not in ["nan", "none", ""])
-
+                curr_files = parse_attached_files(target_p.get("file_id", ""), target_p.get("file_name", ""))
                 p_idx = problems_df[problems_df["problem_id"] == selected_p_id].index
 
-                if has_file:
-                    st.success(f"現在添付中: **{curr_file_name}**")
-                    col_file_view, col_file_del = st.columns([1, 1])
-                    with col_file_view:
-                        st.link_button("🌐 Google ドライブで開く", f"https://drive.google.com/file/d/{curr_file_id}/view")
-                    with col_file_del:
-                        # 添付資料のみの削除処理
-                        if st.button("🗑️ 添付ファイルのみを削除する"):
-                            with st.spinner("ドライブからファイルをゴミ箱へ移動中..."):
-                                delete_file_from_drive(curr_file_id)
-                                problems_df.loc[p_idx, "file_id"] = ""
-                                problems_df.loc[p_idx, "file_name"] = ""
-                                save_problems_df(problems_df)
-                                st.success("添付ファイルを削除しました。")
-                                st.rerun()
-                else:
-                    st.caption("現在ファイルは添付されていません。")
+                if curr_files:
+                    st.caption(f"現在 {len(curr_files)} 件のファイルが添付されています。")
+                    for f_i, f_obj in enumerate(curr_files):
+                        f_id = f_obj.get("id", "")
+                        f_name = f_obj.get("name", f"ファイル {f_i+1}")
+                        is_pdf = f_name.lower().endswith(".pdf")
+                        icon = "📄" if is_pdf else "🖼️"
 
-                # ファイル差し替え / 新規アップロード
-                new_edit_file = st.file_uploader(
-                    "新しいファイルに差し替える / 新規追加（JPEG, PNG, PDF）",
+                        c_label, c_view, c_del = st.columns([3, 1, 1])
+                        with c_label:
+                            st.write(f"{icon} **{f_name}**")
+                        with c_view:
+                            st.link_button("開く", f"https://drive.google.com/file/d/{f_id}/view")
+                        with c_del:
+                            if st.button("🗑️ 削除", key=f"del_single_file_{f_i}"):
+                                with st.spinner(f"ドライブから「{f_name}」を削除中..."):
+                                    delete_file_from_drive(f_id)
+                                    updated_files = [f for idx, f in enumerate(curr_files) if idx != f_i]
+                                    problems_df.loc[p_idx, "file_id"] = dump_attached_files(updated_files)
+                                    problems_df.loc[p_idx, "file_name"] = f"{len(updated_files)}件のファイル" if updated_files else ""
+                                    save_problems_df(problems_df)
+                                    st.success(f"「{f_name}」を削除しました。")
+                                    st.rerun()
+                else:
+                    st.caption("現在添付されているファイルはありません。")
+
+                st.write("")
+                new_add_files = st.file_uploader(
+                    "➕ さらにファイルを追加する（複数選択可）",
                     type=["jpg", "jpeg", "png", "pdf"],
-                    key="edit_file_uploader"
+                    accept_multiple_files=True,
+                    key="add_more_files_uploader"
                 )
 
                 st.write("")
                 col_psav, col_pdel = st.columns(2)
                 with col_psav:
-                    if st.button("問題定義・添付の更新を保存"):
+                    if st.button("問題定義・追加ファイルの保存"):
                         problems_df.loc[p_idx, "subject"] = edit_subject.strip()
                         problems_df.loc[p_idx, "folder_path"] = "/" + edit_folder.strip("/") if edit_folder.strip("/") else "/"
                         problems_df.loc[p_idx, "unit"] = edit_unit.strip()
                         problems_df.loc[p_idx, "title"] = edit_title.strip()
 
-                        if new_edit_file:
+                        if new_add_files:
                             target_drive_folder = st.secrets["connections"]["gsheets"].get("drive_folder_id", "")
-                            with st.spinner("新しいファイルを Google ドライブへ保存中..."):
-                                # 旧ファイルが存在する場合は事前にドライブのゴミ箱へ移動
-                                if has_file:
-                                    delete_file_from_drive(curr_file_id)
+                            with st.spinner(f"新規ファイルを保存中（計 {len(new_add_files)} 件）..."):
+                                for add_f in new_add_files:
+                                    try:
+                                        res = upload_file_to_drive(add_f, target_drive_folder)
+                                        curr_files.append({"id": res.get("id", ""), "name": add_f.name})
+                                    except Exception as a_err:
+                                        st.error(f"ファイル保存失敗 ({add_f.name}): {a_err}")
 
-                                uploaded_res = upload_file_to_drive(new_edit_file, target_drive_folder)
-                                problems_df.loc[p_idx, "file_id"] = uploaded_res.get("id", "")
-                                problems_df.loc[p_idx, "file_name"] = new_edit_file.name
+                                problems_df.loc[p_idx, "file_id"] = dump_attached_files(curr_files)
+                                problems_df.loc[p_idx, "file_name"] = f"{len(curr_files)}件のファイル"
 
                         save_problems_df(problems_df)
                         st.success("問題定義と添付情報を更新しました。")
@@ -1057,9 +1109,10 @@ if load_success:
 
                 with col_pdel:
                     if st.button("この問題を完全に削除"):
-                        # 問題削除時に添付ファイルもドライブのゴミ箱へ移動
-                        if has_file:
-                            delete_file_from_drive(curr_file_id)
+                        # 問題削除時にすべての添付ファイルをドライブのゴミ箱へ移動
+                        if curr_files:
+                            for f_obj in curr_files:
+                                delete_file_from_drive(f_obj.get("id", ""))
 
                         updated_p = problems_df[problems_df["problem_id"] != selected_p_id]
                         save_problems_df(updated_p)
