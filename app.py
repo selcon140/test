@@ -211,7 +211,6 @@ st.markdown("""
         border-radius: 3px 3px 0 0;
     }
 
-    /* サマリーカード */
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -245,7 +244,6 @@ st.markdown("""
         font-weight: 800;
     }
 
-    /* 問題カードグリッド */
     .cards-grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -258,9 +256,7 @@ st.markdown("""
         }
     }
 
-    /* =========================================================================
-       ★ 任天堂風 クリック展開アコーディオンカード（Accordion Card）
-       ========================================================================= */
+    /* 任天堂風 アコーディオンカード */
     details.nintendo-accordion {
         background: #FFFFFF;
         border-radius: 18px;
@@ -280,7 +276,6 @@ st.markdown("""
         }
     }
 
-    /* クリック可能なカード表側 */
     summary.nintendo-card-summary {
         list-style: none;
         cursor: pointer;
@@ -319,7 +314,6 @@ st.markdown("""
         margin-bottom: 16px;
     }
 
-    /* 正答率バー */
     .progress-wrapper {
         margin-bottom: 14px;
     }
@@ -347,7 +341,6 @@ st.markdown("""
     .fill-red { background-color: #EF4444; }
     .fill-gray { background-color: #D1D5DB; }
 
-    /* カード下部ステータス */
     .card-footer {
         display: flex;
         align-items: center;
@@ -375,7 +368,6 @@ st.markdown("""
         border-radius: 12px;
     }
 
-    /* 開閉ガイドヒント（タップ可能であることを示すバー） */
     .toggle-hint-bar {
         display: flex;
         align-items: center;
@@ -401,7 +393,6 @@ st.markdown("""
         transform: rotate(180deg);
     }
 
-    /* 展開される演習履歴リスト */
     .history-drawer {
         background: #F8F9FA;
         border-top: 1px solid #EBEBEB;
@@ -442,16 +433,16 @@ st.markdown("""
         color: #16A34A;
         font-size: 12px;
         font-weight: 800;
-        padding: 2px 8px;
-        border-radius: 6px;
+        padding: 3px 10px;
+        border-radius: 8px;
     }
     .badge-fail {
         background: #FEE2E2;
         color: #DC2626;
         font-size: 12px;
         font-weight: 800;
-        padding: 2px 8px;
-        border-radius: 6px;
+        padding: 3px 10px;
+        border-radius: 8px;
     }
     .history-memo-box {
         font-size: 13px;
@@ -470,7 +461,6 @@ st.markdown("""
         padding: 10px 0;
     }
 
-    /* ボタン・フォームパーツ */
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -670,7 +660,13 @@ if load_success:
                     p_att = p_att.sort_values(by=["attempt_date", "attempt_id"], ascending=[False, False])
                     for _, att_row in p_att.iterrows():
                         att_date_s = html.escape(str(att_row["attempt_date"]))
-                        is_corr = str(att_row["is_correct"]).strip() == "1"
+
+                        # ★ 校正箇所: 浮動小数点数（1.0）や文字列に対応した安全な正誤判定
+                        try:
+                            is_corr = int(float(att_row["is_correct"])) == 1
+                        except (ValueError, TypeError):
+                            is_corr = False
+
                         corr_badge = '<span class="badge-pass">◯ 正解</span>' if is_corr else '<span class="badge-fail">✕ 不正解</span>'
 
                         memo_raw = str(att_row["memo"]).strip() if pd.notna(att_row["memo"]) else ""
@@ -861,10 +857,17 @@ if load_success:
                     def_date = date.today()
 
                 edit_date = st.date_input("日付を変更", value=def_date)
+
+                # ★ 校正箇所: 編集フォーム側の初期選択インデックスも浮動小数点数を考慮して安全に取得
+                try:
+                    curr_is_corr = int(float(target_row["is_correct"])) == 1
+                except Exception:
+                    curr_is_corr = False
+
                 edit_result = st.radio(
                     "結果を変更",
                     ["正解 (◯)", "不正解 (✕)"],
-                    index=0 if int(target_row["is_correct"]) == 1 else 1,
+                    index=0 if curr_is_corr else 1,
                     horizontal=True
                 )
                 edit_memo = st.text_input("メモを変更", value=str(target_row["memo"]) if pd.notna(target_row["memo"]) else "")
