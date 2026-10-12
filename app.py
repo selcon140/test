@@ -8,6 +8,8 @@ from googleapiclient.http import MediaIoBaseUpload
 import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import base64
+import requests
 
 # -----------------------------------------------------------------------------
 # Google 連携・Drive API / スプレッドシート最適化
@@ -42,6 +44,38 @@ def get_drive_service():
         return None
 
 def upload_file_to_drive(uploaded_file, target_folder_id: str) -> dict:
+    """Google Apps Script (GAS) 経由で個人の Google ドライブへ保存"""
+    gas_url = st.secrets["connections"]["gsheets"].get("gas_upload_url", "")
+    if not gas_url:
+        raise ValueError("Secrets に gas_upload_url が設定されていません。")
+
+    raw_folder_id = target_folder_id.strip().strip('"').strip("'")
+    if "/folders/" in raw_folder_id:
+        raw_folder_id = raw_folder_id.split("/folders/")[-1].split("?")[0].split("/")[0]
+
+    # ファイルデータを Base64 エンコード
+    file_bytes = uploaded_file.getvalue()
+    b64_str = base64.b64encode(file_bytes).decode("utf-8")
+
+    payload = {
+        "folderId": raw_folder_id,
+        "fileName": uploaded_file.name,
+        "mimeType": uploaded_file.type or "application/octet-stream",
+        "base64Data": b64_str
+    }
+
+    resp = requests.post(gas_url, json=payload, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"GAS サーバーとの通信に失敗しました (Status: {resp.status_code})")
+
+    res_json = resp.json()
+    if res_json.get("status") != "success":
+        raise RuntimeError(f"ドライブへの保存エラー: {res_json.get('message')}")
+
+    return {
+        "id": res_json.get("fileId"),
+        "webViewLink": res_json.get("url")
+    }
     """ファイルを Google ドライブにアップロードし、ファイルIDと表示用URLを取得"""
     service = get_drive_service()
     if not service:
