@@ -4,6 +4,7 @@ import base64
 import html
 import json
 import posixpath
+import random
 import requests
 import pandas as pd
 import streamlit as st
@@ -726,6 +727,8 @@ if "current_folder" not in st.session_state:
     st.session_state.current_folder = "/"
 if "created_folders" not in st.session_state:
     st.session_state.created_folders = set()
+if "shuffle_seed" not in st.session_state:
+    st.session_state.shuffle_seed = 42
 
 # -----------------------------------------------------------------------------
 # データ取得部
@@ -882,6 +885,68 @@ if load_success:
                 st.info("このフォルダには問題がありません。")
             elif not current_problems.empty:
                 st.write(f"**📄 問題一覧（{len(current_problems)}問）**")
+
+                # =========================================================================
+                # ★ 並び替え（ソート: Sorting）およびランダムシャッフル機能
+                # =========================================================================
+                col_sort, col_rand_btn = st.columns([2.5, 1.2])
+                with col_sort:
+                    sort_metric = st.selectbox(
+                        "並び替え基準（ソート）",
+                        [
+                            "復習優先（未着手・経過日数が長い順）",
+                            "直近演習順（最近解いた順）",
+                            "弱点克服（正答率が低い順）",
+                            "定着度順（正答率が高い順）",
+                            "取り組み頻度が少ない順（演習回数：少）",
+                            "取り組み頻度が多い順（演習回数：多）",
+                            "問題ID順",
+                            "🎲 ランダム（シャッフル）"
+                        ],
+                        key="sort_metric_selector"
+                    )
+
+                with col_rand_btn:
+                    if sort_metric == "🎲 ランダム（シャッフル）":
+                        st.write("")
+                        st.write("")
+                        if st.button("🔀 再シャッフル", key="btn_reshuffle_now"):
+                            st.session_state.shuffle_seed = random.randint(1, 100000)
+                            st.rerun()
+
+                # 並び替え処理
+                if sort_metric == "復習優先（未着手・経過日数が長い順）":
+                    current_problems = current_problems.sort_values(
+                        by="elapsed_days", ascending=False, na_position="first"
+                    )
+                elif sort_metric == "直近演習順（最近解いた順）":
+                    current_problems = current_problems.sort_values(
+                        by="elapsed_days", ascending=True, na_position="last"
+                    )
+                elif sort_metric == "弱点克服（正答率が低い順）":
+                    current_problems = current_problems.sort_values(
+                        by="accuracy", ascending=True, na_position="last"
+                    )
+                elif sort_metric == "定着度順（正答率が高い順）":
+                    current_problems = current_problems.sort_values(
+                        by="accuracy", ascending=False, na_position="last"
+                    )
+                elif sort_metric == "取り組み頻度が少ない順（演習回数：少）":
+                    current_problems = current_problems.sort_values(
+                        by="total_attempts", ascending=True
+                    )
+                elif sort_metric == "取り組み頻度が多い順（演習回数：多）":
+                    current_problems = current_problems.sort_values(
+                        by="total_attempts", ascending=False
+                    )
+                elif sort_metric == "問題ID順":
+                    current_problems = current_problems.sort_values(
+                        by="problem_id"
+                    )
+                elif sort_metric == "🎲 ランダム（シャッフル）":
+                    current_problems = current_problems.sample(
+                        frac=1, random_state=st.session_state.shuffle_seed
+                    ).reset_index(drop=True)
 
                 cards_html = '<div class="cards-grid">\n'
                 for _, r in current_problems.iterrows():
@@ -1061,7 +1126,7 @@ if load_success:
             st.write(f"**全体進捗（{curr_pg} / {total_pg} ページ完了）**")
             st.progress(rate / 100.0)
 
-            # --- 進捗追記フォーム ---
+            # 進捗追記フォーム
             with st.expander("✏️ 進捗を追記・記録する", expanded=False):
                 struct_raw = str(target_book.get("structure_json", "[]")).strip()
                 try:
@@ -1139,7 +1204,7 @@ if load_success:
                     st.success(f"進捗を記録しました（現在: {new_curr} / {total_pg} p）")
                     st.rerun()
 
-            # --- 読破ページ数の推移チャート ---
+            # 読破ページ数の推移チャート
             st.write("---")
             st.write("**📈 読破ページ数の推移（Cumulative progress）**")
 
@@ -1181,7 +1246,7 @@ if load_success:
             else:
                 st.caption("進捗ログが蓄積されると、ここに時系列の読破推移グラフが表示されます。")
 
-            # --- 章・単元構成の表示 ---
+            # 章・単元構成の表示
             struct_raw = str(target_book.get("structure_json", "[]")).strip()
             try:
                 struct_data = json.loads(struct_raw) if struct_raw else []
@@ -1205,7 +1270,7 @@ if load_success:
                             u_info = f" — {u_pages}p" if u_pages > 0 else ""
                             st.caption(f" └ 📄 {u_name}{u_info}")
 
-            # --- ★ 新設: 参考書をその場で削除するアコーディオン ---
+            # 参考書をその場で削除するアコーディオン
             st.write("---")
             with st.expander("🗑️ この参考書を削除する", expanded=False):
                 st.warning(f"参考書「{target_book['title']}」および紐付いている進捗ログが完全に削除されます。よろしいですか？")
@@ -1218,7 +1283,7 @@ if load_success:
                     st.success(f"参考書「{target_book['title']}」を削除しました。")
                     st.rerun()
 
-        # --- 参考書新規登録パネル ---
+        # 参考書新規登録パネル
         st.write("---")
         with st.expander("➕ 参考書を新規登録する", expanded=False):
             st.subheader("新しい参考書の登録")
@@ -1532,7 +1597,7 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 5: マスタ管理（参考書マスタの編集・削除を追加）
+    # タブ 5: マスタ管理
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
@@ -1759,7 +1824,6 @@ if load_success:
                         st.warning("履歴を削除しました。")
                         st.rerun()
 
-        # --- ★ 新設: 参考書マスタの編集・削除サブアクション ---
         elif sub_action == "参考書マスタの編集・削除":
             st.subheader("参考書マスタの編集・削除")
             if books_df.empty:
@@ -1808,7 +1872,6 @@ if load_success:
                     if st.button("この参考書を完全に削除"):
                         updated_b = books_df[books_df["book_id"] != selected_b_id_m]
                         save_books_df(updated_b)
-                        # カスケード削除
                         if not book_logs_df.empty:
                             updated_bl = book_logs_df[book_logs_df["book_id"] != selected_b_id_m]
                             save_book_logs_df(updated_bl)
