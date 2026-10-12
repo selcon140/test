@@ -135,7 +135,6 @@ def get_attempts_df() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def get_todos_df() -> pd.DataFrame:
-    """ToDoタスクマスタ（todos シート）をキャッシュして取得（未作成時も安全にフォールバック）"""
     try:
         conn = get_connection()
         df = conn.read(worksheet="todos")
@@ -150,6 +149,40 @@ def get_todos_df() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame(columns=["todo_id", "problem_id", "subject", "unit", "task_desc", "due_date", "status", "created_at"])
 
+@st.cache_data(ttl=60)
+def get_books_df() -> pd.DataFrame:
+    """参考書マスタ（books シート）を取得"""
+    try:
+        conn = get_connection()
+        df = conn.read(worksheet="books")
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["book_id", "title", "subject", "total_pages", "current_pages", "structure_json", "created_at"])
+        df = df.dropna(how="all")
+        for col in ["book_id", "title", "subject", "total_pages", "current_pages", "structure_json", "created_at"]:
+            if col not in df.columns:
+                df[col] = ""
+        df = df[df["book_id"].astype(str).str.strip() != ""]
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["book_id", "title", "subject", "total_pages", "current_pages", "structure_json", "created_at"])
+
+@st.cache_data(ttl=60)
+def get_book_logs_df() -> pd.DataFrame:
+    """参考書進捗ログ（book_logs シート）を取得"""
+    try:
+        conn = get_connection()
+        df = conn.read(worksheet="book_logs")
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["log_id", "book_id", "log_date", "chapter", "unit", "pages_read", "cumulative_page", "memo"])
+        df = df.dropna(how="all")
+        for col in ["log_id", "book_id", "log_date", "chapter", "unit", "pages_read", "cumulative_page", "memo"]:
+            if col not in df.columns:
+                df[col] = ""
+        df = df[df["log_id"].astype(str).str.strip() != ""]
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["log_id", "book_id", "log_date", "chapter", "unit", "pages_read", "cumulative_page", "memo"])
+
 def save_problems_df(df: pd.DataFrame):
     conn = get_connection()
     conn.update(worksheet="problems", data=df)
@@ -163,6 +196,16 @@ def save_attempts_df(df: pd.DataFrame):
 def save_todos_df(df: pd.DataFrame):
     conn = get_connection()
     conn.update(worksheet="todos", data=df)
+    st.cache_data.clear()
+
+def save_books_df(df: pd.DataFrame):
+    conn = get_connection()
+    conn.update(worksheet="books", data=df)
+    st.cache_data.clear()
+
+def save_book_logs_df(df: pd.DataFrame):
+    conn = get_connection()
+    conn.update(worksheet="book_logs", data=df)
     st.cache_data.clear()
 
 def fetch_aggregated_data(problems_df: pd.DataFrame, attempts_df: pd.DataFrame) -> pd.DataFrame:
@@ -283,7 +326,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] {
         background-color: transparent;
         border-bottom: 2px solid #E5E7EB;
-        gap: 8px;
+        gap: 6px;
         padding-left: 0;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -291,8 +334,8 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         background-color: transparent !important;
         border: none !important;
-        padding: 12px 16px !important;
-        font-size: 15px !important;
+        padding: 12px 14px !important;
+        font-size: 14.5px !important;
         font-weight: 700;
         color: #71717A;
         white-space: nowrap;
@@ -579,7 +622,7 @@ st.markdown("""
         word-break: break-all;
     }
 
-    /* ToDo カードデザイン */
+    /* ToDo & 参考書カードデザイン */
     .todo-card {
         background: #FFFFFF;
         border-radius: 16px;
@@ -587,7 +630,6 @@ st.markdown("""
         padding: 18px;
         margin-bottom: 12px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.02);
-        transition: transform 0.2s ease, border-color 0.2s ease;
     }
     .todo-card.done {
         background: #FAFAFA;
@@ -652,6 +694,15 @@ st.markdown("""
         color: #9CA3AF;
     }
 
+    .book-panel {
+        background: #FFFFFF;
+        border-radius: 18px;
+        border: 1px solid #ECECEC;
+        padding: 22px;
+        margin-bottom: 16px;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.03);
+    }
+
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -677,7 +728,7 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 st.markdown("""
 <div class="nintendo-header">
-    <div class="nintendo-badge">Study Master</div>
+    <div class="nintendo-badge">Denki Studio</div>
     <div class="nintendo-title">演習ダッシュボード</div>
 </div>
 """, unsafe_allow_html=True)
@@ -694,6 +745,8 @@ try:
     problems_df = get_problems_df()
     attempts_df = get_attempts_df()
     todos_df = get_todos_df()
+    books_df = get_books_df()
+    book_logs_df = get_book_logs_df()
     load_success = True
 except Exception as e:
     load_success = False
@@ -702,8 +755,9 @@ except Exception as e:
         st.rerun()
 
 if load_success:
-    tab_catalog, tab_todo, tab_entry, tab_manage = st.tabs([
+    tab_catalog, tab_books, tab_todo, tab_entry, tab_manage = st.tabs([
         "📁 エクスプローラー",
+        "📖 参考書進捗",
         "✅ ToDoタスク",
         "✏️ 演習記録",
         "⚙️ マスタ管理"
@@ -975,12 +1029,238 @@ if load_success:
                 st.markdown(clean_cards_html, unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------------
-    # タブ 2: ToDoタスク機能（New Feature）
+    # タブ 2: 参考書進捗管理（New Feature）
+    # -----------------------------------------------------------------------------
+    with tab_books:
+        st.subheader("参考書・テキスト進行度管理")
+
+        if books_df.empty:
+            st.info("登録されている参考書がありません。下の「➕ 参考書を新規登録する」から登録してください。")
+        else:
+            book_options = {
+                f"[{r['book_id']}] {r['title']} ({r['subject']})": r['book_id']
+                for _, r in books_df.iterrows()
+            }
+            selected_book_label = st.selectbox("管理する参考書を選択", list(book_options.keys()))
+            selected_book_id = book_options[selected_book_label]
+            target_book = books_df[books_df["book_id"] == selected_book_id].iloc[0]
+
+            # 基本スペック
+            total_pg = int(pd.to_numeric(target_book.get("total_pages", 0), errors="coerce") or 1)
+            curr_pg = int(pd.to_numeric(target_book.get("current_pages", 0), errors="coerce") or 0)
+            curr_pg = min(curr_pg, total_pg)
+            remain_pg = max(total_pg - curr_pg, 0)
+            rate = round((curr_pg / total_pg) * 100, 1)
+
+            # サマリー指標カード
+            b_summary_html = f"""
+            <div class="summary-grid">
+                <div class="summary-card primary">
+                    <div class="summary-label">現在の進行度</div>
+                    <div class="summary-value">{rate}%</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">消化ページ</div>
+                    <div class="summary-value">{curr_pg} / {total_pg} <span style="font-size:12px;">p</span></div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">残りページ</div>
+                    <div class="summary-value">{remain_pg} <span style="font-size:12px;">p</span></div>
+                </div>
+            </div>
+            """
+            st.markdown("\n".join(line.strip() for line in b_summary_html.splitlines()), unsafe_allow_html=True)
+
+            # 大型プログレスバー
+            st.write(f"**全体進捗（{curr_pg} / {total_pg} ページ完了）**")
+            st.progress(rate / 100.0)
+
+            # --- 進捗追記フォーム ---
+            with st.expander("✏️ 進捗を追記・記録する", expanded=False):
+                # 階層定義の解析
+                struct_raw = str(target_book.get("structure_json", "[]")).strip()
+                try:
+                    struct_data = json.loads(struct_raw) if struct_raw else []
+                except Exception:
+                    struct_data = []
+
+                chapter_names = [ch.get("chapter_name", "") for ch in struct_data if ch.get("chapter_name")]
+
+                c_ch, c_un = st.columns(2)
+                with c_ch:
+                    if chapter_names:
+                        sel_chapter = st.selectbox("対象の章（任意）", ["（指定なし）"] + chapter_names)
+                    else:
+                        sel_chapter = st.text_input("対象の章（任意）", placeholder="例: 第1章 ガウスの法則")
+
+                with c_un:
+                    unit_candidates = []
+                    if chapter_names and sel_chapter != "（指定なし）":
+                        for ch in struct_data:
+                            if ch.get("chapter_name") == sel_chapter:
+                                unit_candidates = [u.get("unit_name", "") for u in ch.get("units", []) if u.get("unit_name")]
+                    if unit_candidates:
+                        sel_unit = st.selectbox("対象の単元（任意）", ["（指定なし）"] + unit_candidates)
+                    else:
+                        sel_unit = st.text_input("対象の単元（任意）", placeholder="例: 同軸円筒の電界")
+
+                c_mode, c_val = st.columns([1, 1])
+                with c_mode:
+                    entry_mode = st.radio("入力形式", ["今日進めたページ数（＋加算）", "到達したページ数（直接指定）"], horizontal=True)
+                with c_val:
+                    if entry_mode == "今日進めたページ数（＋加算）":
+                        pages_input = st.number_input("進めたページ数", min_value=1, max_value=total_pg, value=10, step=1)
+                    else:
+                        pages_input = st.number_input("現在の到達ページ", min_value=0, max_value=total_pg, value=curr_pg, step=1)
+
+                col_log_date, col_log_memo = st.columns([1, 2])
+                with col_log_date:
+                    log_date_val = st.date_input("記録日", value=date.today(), key="b_log_date")
+                with col_log_memo:
+                    log_memo_val = st.text_input("学習メモ", placeholder="例: 章末問題5問完答、定理の導出完了")
+
+                st.write("")
+                if st.button("この進捗を保存する"):
+                    if entry_mode == "今日進めたページ数（＋加算）":
+                        new_curr = min(curr_pg + int(pages_input), total_pg)
+                        added_pages = int(pages_input)
+                    else:
+                        new_curr = min(int(pages_input), total_pg)
+                        added_pages = max(new_curr - curr_pg, 0)
+
+                    # 1. books テーブルの更新
+                    b_idx = books_df[books_df["book_id"] == selected_book_id].index
+                    books_df.loc[b_idx, "current_pages"] = new_curr
+                    save_books_df(books_df)
+
+                    # 2. book_logs テーブルの追加
+                    if book_logs_df.empty or "log_id" not in book_logs_df.columns:
+                        next_log_id = 1
+                    else:
+                        ex_ids = pd.to_numeric(book_logs_df["log_id"], errors="coerce").dropna()
+                        next_log_id = int(ex_ids.max() + 1) if not ex_ids.empty else 1
+
+                    new_log_row = pd.DataFrame([{
+                        "log_id": next_log_id,
+                        "book_id": selected_book_id,
+                        "log_date": log_date_val.strftime("%Y-%m-%d"),
+                        "chapter": sel_chapter if sel_chapter != "（指定なし）" else "",
+                        "unit": sel_unit if sel_unit != "（指定なし）" else "",
+                        "pages_read": added_pages,
+                        "cumulative_page": new_curr,
+                        "memo": log_memo_val.strip()
+                    }])
+                    updated_logs = pd.concat([book_logs_df, new_log_row], ignore_index=True)
+                    save_book_logs_df(updated_logs)
+
+                    st.success(f"進捗を記録しました（現在: {new_curr} / {total_pg} p）")
+                    st.rerun()
+
+            # --- グラフ表示（進捗推移チャート） ---
+            st.write("---")
+            st.write("**📈 読破ページ数の推移（Cumulative progress）**")
+
+            target_logs = book_logs_df[book_logs_df["book_id"] == selected_book_id].copy() if not book_logs_df.empty else pd.DataFrame()
+            if not target_logs.empty:
+                target_logs["log_date"] = pd.to_datetime(target_logs["log_date"])
+                target_logs["cumulative_page"] = pd.to_numeric(target_logs["cumulative_page"], errors="coerce").fillna(0)
+                chart_df = target_logs.sort_values(by="log_date").groupby(target_logs["log_date"].dt.strftime("%Y-%m-%d"))["cumulative_page"].max().reset_index()
+                chart_df = chart_df.rename(columns={"log_date": "日付", "cumulative_page": "到達ページ数"})
+                st.line_chart(chart_df.set_index("日付"), use_container_width=True)
+            else:
+                st.caption("進捗ログが蓄積されると、ここに時系列の読破推移グラフが表示されます。")
+
+            # --- 章・単元ごとの進行度ブレイクダウン ---
+            struct_raw = str(target_book.get("structure_json", "[]")).strip()
+            try:
+                struct_data = json.loads(struct_raw) if struct_raw else []
+            except Exception:
+                struct_data = []
+
+            if struct_data:
+                st.write("---")
+                st.write("**📑 章・単元ごとの構成と目安**")
+                for ch_item in struct_data:
+                    ch_title = ch_item.get("chapter_name", "章")
+                    ch_pages = ch_item.get("chapter_pages", 0)
+                    ch_info = f"（総 {ch_pages}p）" if ch_pages > 0 else ""
+                    st.write(f"📁 **{ch_title}** {ch_info}")
+
+                    u_list = ch_item.get("units", [])
+                    if u_list:
+                        for u_item in u_list:
+                            u_name = u_item.get("unit_name", "単元")
+                            u_pages = u_item.get("unit_pages", 0)
+                            u_info = f" — {u_pages}p" if u_pages > 0 else ""
+                            st.caption(f" └ 📄 {u_name}{u_info}")
+
+        # --- 参考書新規登録パネル ---
+        st.write("---")
+        with st.expander("➕ 参考書を新規登録する", expanded=False):
+            st.subheader("新しい参考書の登録")
+            new_b_id = st.text_input("参考書ID（例: BK-001）")
+            new_b_title = st.text_input("参考書名（例: 詳解 電磁気学演習）")
+            new_b_sub = st.text_input("科目名（例: 電磁気学）")
+            new_b_total = st.number_input("参考書全体の総ページ数（必須）", min_value=1, max_value=5000, value=300, step=10)
+
+            st.write("**章・単元構成（任意: JSON形式 または 簡易定義）**")
+            st.caption("章や単元の目安ページ数を設定したい場合は記述してください（空欄でも問題ありません）。")
+            default_struct_sample = json.dumps([
+                {
+                    "chapter_name": "第1章 静電場",
+                    "chapter_pages": 50,
+                    "units": [
+                        {"unit_name": "クーロンの法則", "unit_pages": 20},
+                        {"unit_name": "ガウスの法則", "unit_pages": 30}
+                    ]
+                },
+                {
+                    "chapter_name": "第2章 電位と導体",
+                    "chapter_pages": 40,
+                    "units": []
+                }
+            ], ensure_ascii=False, indent=2)
+
+            struct_input = st.text_area("構成定義（JSON）", value=default_struct_sample, height=180)
+
+            st.write("")
+            if st.button("この参考書を登録する"):
+                if new_b_id.strip() and new_b_title.strip() and new_b_total > 0:
+                    clean_b_id = new_b_id.strip()
+                    if not books_df.empty and clean_b_id in books_df["book_id"].values:
+                        st.error("その参考書IDは既に登録されています。")
+                    else:
+                        # JSON構文の検証
+                        parsed_struct = []
+                        if struct_input.strip():
+                            try:
+                                parsed_struct = json.loads(struct_input.strip())
+                            except Exception as j_err:
+                                st.warning(f"JSON構文に不備があるため空構成として登録します: {j_err}")
+                                parsed_struct = []
+
+                        new_b_row = pd.DataFrame([{
+                            "book_id": clean_b_id,
+                            "title": new_b_title.strip(),
+                            "subject": new_b_sub.strip() if new_b_sub.strip() else "一般",
+                            "total_pages": int(new_b_total),
+                            "current_pages": 0,
+                            "structure_json": json.dumps(parsed_struct, ensure_ascii=False),
+                            "created_at": date.today().strftime("%Y-%m-%d")
+                        }])
+                        updated_b_df = pd.concat([books_df, new_b_row], ignore_index=True)
+                        save_books_df(updated_b_df)
+                        st.success(f"参考書「{new_b_title.strip()}」を登録しました。")
+                        st.rerun()
+                else:
+                    st.error("参考書ID、参考書名、総ページ数は必須です。")
+
+    # -----------------------------------------------------------------------------
+    # タブ 3: ToDoタスク
     # -----------------------------------------------------------------------------
     with tab_todo:
         st.subheader("学習 ToDo タスク管理")
 
-        # --- サマリーバーの集計 ---
         today_date = date.today()
         if not todos_df.empty:
             open_todos = todos_df[todos_df["status"] != "done"].copy()
@@ -1019,7 +1299,6 @@ if load_success:
         """
         st.markdown("\n".join(line.strip() for line in todo_summary_html.splitlines()), unsafe_allow_html=True)
 
-        # --- 新規 ToDo タスク作成パネル ---
         with st.expander("➕ 新しい ToDo タスクを計画する", expanded=False):
             if problems_df.empty:
                 st.warning("先に問題マスタを追加してください。")
@@ -1050,7 +1329,7 @@ if load_success:
                 with col_tdue:
                     target_due = st.date_input("完了目標日（いつまでに）", value=today_date + timedelta(days=3))
 
-                target_desc = st.text_input("達成目標・タスク内容（何を終わらせるか）", placeholder="例: ノーヒントで解答を再現できるようにする / 公式証明のまとめ")
+                target_desc = st.text_input("達成目標・タスク内容（何を終わらせるか）", placeholder="例: ノーヒントで解答を再現できるようにする")
 
                 st.write("")
                 if st.button("この目標を ToDo に追加する"):
@@ -1081,7 +1360,6 @@ if load_success:
 
         st.write("---")
 
-        # --- タスク一覧とステータス切り替え ---
         if todos_df.empty:
             st.info("現在登録されている ToDo タスクはありません。上のフォームから目標を追加してください。")
         else:
@@ -1093,7 +1371,6 @@ if load_success:
             elif filter_mode == "完了済み":
                 display_todos = display_todos[display_todos["status"] == "done"]
 
-            # ソート（期限日が近い順）
             display_todos = display_todos.sort_values(by=["due_date", "todo_id"], ascending=[True, True])
 
             if display_todos.empty:
@@ -1108,7 +1385,6 @@ if load_success:
                     unit_s = html.escape(str(t_row["unit"]))
                     p_id_raw = str(t_row.get("problem_id", "")).strip()
 
-                    # 紐付く問題タイトル
                     p_title_str = ""
                     if p_id_raw and p_id_raw.lower() not in ["nan", "none", ""]:
                         match_prob = problems_df[problems_df["problem_id"] == p_id_raw]
@@ -1117,7 +1393,6 @@ if load_success:
                         else:
                             p_title_str = f"[{p_id_raw}]"
 
-                    # 期限日バッジの計算
                     try:
                         due_d = datetime.strptime(due_str[:10], "%Y-%m-%d").date()
                         diff_days = (due_d - today_date).days
@@ -1139,7 +1414,6 @@ if load_success:
                     if p_title_str:
                         scope_label += f" → 📄 {p_title_str}"
 
-                    # カード描画
                     card_class = "todo-card done" if is_done else "todo-card"
                     desc_class = "todo-desc-text done" if is_done else "todo-desc-text"
 
@@ -1161,7 +1435,7 @@ if load_success:
                             if st.button("✓ 完了にする", key=f"btn_done_{t_id_str}"):
                                 todos_df.loc[t_idx, "status"] = "done"
                                 save_todos_df(todos_df)
-                                st.success("タスクを完了にしました！お疲れ様でした。")
+                                st.success("タスクを完了にしました！")
                                 st.rerun()
                         else:
                             if st.button("↩️ 未完了に戻す", key=f"btn_reopen_{t_id_str}"):
@@ -1178,7 +1452,7 @@ if load_success:
                     st.write("")
 
     # -----------------------------------------------------------------------------
-    # タブ 3: 演習ログ登録
+    # タブ 4: 演習ログ登録
     # -----------------------------------------------------------------------------
     with tab_entry:
         st.subheader("演習結果を記録する")
@@ -1235,7 +1509,7 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 4: マスタ管理
+    # タブ 5: マスタ管理
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
