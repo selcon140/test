@@ -1753,7 +1753,22 @@ if load_success:
                 new_subject = st.text_input("新規科目名")
 
             target_f_path = st.selectbox("配置フォルダ", all_known_paths)
-            new_unit = st.text_input("単元名（例: ガウスの法則）")
+
+            # 選択された科目に属する既存単元（無ければ全登録単元）を抽出
+            existing_units = []
+            if not problems_df.empty:
+                if new_subject:
+                    sub_units = problems_df[problems_df["subject"] == new_subject.strip()]["unit"].unique()
+                    existing_units = sorted([u for u in sub_units if str(u).strip()])
+                if not existing_units:
+                    existing_units = sorted([u for u in problems_df["unit"].unique() if str(u).strip()])
+
+            unit_mode = st.radio("単元名の指定方法", ["既存から選択", "新規入力"], horizontal=True)
+            if unit_mode == "既存から選択" and existing_units:
+                new_unit = st.selectbox("既存の単元", existing_units)
+            else:
+                new_unit = st.text_input("単元名（例: ガウスの法則）")
+
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
 
             st.write("---")
