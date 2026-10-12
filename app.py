@@ -1,47 +1,17 @@
 from datetime import date, datetime
+import base64
 import html
-import io
 import posixpath
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+import requests
 import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-import base64
-import requests
 
 # -----------------------------------------------------------------------------
-# Google 連携・Drive API / スプレッドシート最適化
+# Google 連携・GAS 中継 API / スプレッドシート関数
 # -----------------------------------------------------------------------------
 def get_connection():
     return st.connection("gsheets", type=GSheetsConnection)
-
-def get_drive_service():
-    """Secrets の認証情報から Google Drive API クライアントを初期化"""
-    try:
-        secrets = st.secrets["connections"]["gsheets"]
-        creds_dict = {
-            "type": secrets.get("type", "service_account"),
-            "project_id": secrets["project_id"],
-            "private_key_id": secrets.get("private_key_id"),
-            "private_key": secrets["private_key"],
-            "client_email": secrets["client_email"],
-            "client_id": secrets.get("client_id"),
-            "auth_uri": secrets.get("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
-            "token_uri": secrets.get("token_uri", "https://oauth2.googleapis.com/token"),
-            "auth_provider_x509_cert_url": secrets.get("auth_provider_x509_cert_url"),
-            "client_x509_cert_url": secrets.get("client_x509_cert_url"),
-        }
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        return build("drive", "v3", credentials=creds)
-    except Exception as e:
-        st.error(f"Google Drive API の認証初期化に失敗しました: {e}")
-        return None
 
 def upload_file_to_drive(uploaded_file, target_folder_id: str) -> dict:
     """Google Apps Script (GAS) 経由で個人の Google ドライブへ保存"""
@@ -53,11 +23,11 @@ def upload_file_to_drive(uploaded_file, target_folder_id: str) -> dict:
     if "/folders/" in raw_folder_id:
         raw_folder_id = raw_folder_id.split("/folders/")[-1].split("?")[0].split("/")[0]
 
-    # ファイルデータを Base64 エンコード
     file_bytes = uploaded_file.getvalue()
     b64_str = base64.b64encode(file_bytes).decode("utf-8")
 
     payload = {
+        "action": "upload",
         "folderId": raw_folder_id,
         "fileName": uploaded_file.name,
         "mimeType": uploaded_file.type or "application/octet-stream",
@@ -70,47 +40,33 @@ def upload_file_to_drive(uploaded_file, target_folder_id: str) -> dict:
 
     res_json = resp.json()
     if res_json.get("status") != "success":
-        raise RuntimeError(f"ドライブへの保存エラー: {res_json.get('message')}")
+        raise RuntimeError(f"ドライブ保存エラー: {res_json.get('message')}")
 
     return {
         "id": res_json.get("fileId"),
         "webViewLink": res_json.get("url")
     }
-    """ファイルを Google ドライブにアップロードし、ファイルIDと表示用URLを取得"""
-    service = get_drive_service()
-    if not service:
-        raise RuntimeError("Drive サービスを初期化できませんでした。")
 
-    file_metadata = {
-        "name": uploaded_file.name,
-        "parents": [target_folder_id]
+def delete_file_from_drive(file_id: str):
+    """Google Apps Script (GAS) 経由で Google ドライブ上の実ファイルをゴミ箱へ移動"""
+    if not file_id or str(file_id).lower() in ["nan", "none", ""]:
+        return
+    gas_url = st.secrets["connections"]["gsheets"].get("gas_upload_url", "")
+    if not gas_url:
+        return
+
+    payload = {
+        "action": "delete",
+        "fileId": str(file_id).strip()
     }
-    media = MediaIoBaseUpload(
-        io.BytesIO(uploaded_file.getvalue()),
-        mimetype=uploaded_file.type,
-        resumable=True
-    )
-
-    created_file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id, name, webViewLink, webContentLink"
-    ).execute()
-
-    # サービスアカウント以外もリンクから閲覧可能にする権限設定（Reader）
     try:
-        service.permissions().create(
-            fileId=created_file.get("id"),
-            body={"type": "anyone", "role": "reader"}
-        ).execute()
-    except Exception:
-        pass
-
-    return created_file
+        requests.post(gas_url, json=payload, timeout=30)
+    except Exception as e:
+        st.warning(f"Google ドライブ上の旧ファイル削除時に警告が発生しました: {e}")
 
 @st.cache_data(ttl=60)
 def get_problems_df() -> pd.DataFrame:
-    """問題マスタ（problems シート）をキャッシュして取得（folder_path, file_id などを自動補完）"""
+    """問題マスタ（problems シート）をキャッシュして取得"""
     conn = get_connection()
     df = conn.read(worksheet="problems")
     if df is None or df.empty:
@@ -278,38 +234,6 @@ st.markdown("""
         border-color: #E60012 !important;
         background: #FFF5F5 !important;
         color: #E60012 !important;
-    }
-
-    .error-card {
-        background: #FFFFFF;
-        border-radius: 16px;
-        border-left: 6px solid #E60012;
-        border-right: 1px solid #ECECEC;
-        border-top: 1px solid #ECECEC;
-        border-bottom: 1px solid #ECECEC;
-        padding: 20px;
-        margin: 20px 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
-    }
-    .error-card-title {
-        font-size: 18px;
-        font-weight: 800;
-        color: #E60012;
-        margin-bottom: 8px;
-    }
-    .error-card-desc {
-        font-size: 14px;
-        color: #3F3F46;
-        line-height: 1.6;
-        margin-bottom: 12px;
-    }
-    .error-card-action {
-        font-size: 13px;
-        font-weight: 700;
-        color: #71717A;
-        background: #F4F4F5;
-        padding: 8px 12px;
-        border-radius: 8px;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -655,8 +579,7 @@ try:
     load_success = True
 except Exception as e:
     load_success = False
-    err_str = str(e)
-    st.error(f"データ取得エラー: {err_str}")
+    st.error(f"データ取得エラー: {e}")
     if st.button("🔄 再読み込み"):
         st.rerun()
 
@@ -664,7 +587,7 @@ if load_success:
     tab_catalog, tab_entry, tab_manage = st.tabs(["📁 エクスプローラー", "✏️ 演習記録", "⚙️ マスタ管理"])
 
     # -----------------------------------------------------------------------------
-    # タブ 1: エクスプローラー（フォルダ階層 & ファイル閲覧）
+    # タブ 1: エクスプローラー
     # -----------------------------------------------------------------------------
     with tab_catalog:
         data = fetch_aggregated_data(problems_df, attempts_df)
@@ -834,7 +757,6 @@ if load_success:
                         status_badge = '<span class="safe-pill">定着中</span>'
                         elapsed_text = f"{int(r['elapsed_days'])}日前"
 
-                    # 添付ファイルの表示ブロック
                     file_block_html = ""
                     if f_id_raw and f_id_raw.lower() not in ["nan", "none", ""]:
                         is_pdf = f_name_raw.lower().endswith(".pdf")
@@ -859,7 +781,6 @@ if load_success:
                             </div>
                             """
 
-                    # 演習履歴
                     p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy() if not attempts_df.empty else pd.DataFrame()
                     history_rows_html = ""
                     if p_att.empty:
@@ -989,12 +910,12 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 3: マスタ管理（問題登録 & ファイルアップロード）
+    # タブ 3: マスタ管理（問題登録 & ファイル添付・更新・削除）
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
             "操作を選択",
-            ["新規問題の追加（ファイル添付対応）", "問題マスタ・添付ファイルの編集", "演習履歴の編集・削除"],
+            ["新規問題の追加（ファイル添付対応）", "問題マスタ・添付ファイルの編集・削除", "演習履歴の編集・削除"],
             horizontal=True
         )
         st.write("---")
@@ -1015,7 +936,6 @@ if load_success:
             new_unit = st.text_input("単元名（例: ガウスの法則）")
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
 
-            # ファイルアップロード（JPEG / PNG / PDF）
             st.write("---")
             uploaded_file = st.file_uploader(
                 "📎 問題の図面・解答 PDF をアップロード（任意）",
@@ -1059,8 +979,8 @@ if load_success:
                 else:
                     st.error("必須項目（ID、科目、単元、問題名）をすべて入力してください。")
 
-        elif sub_action == "問題マスタ・添付ファイルの編集":
-            st.subheader("問題定義の修正 & 添付ファイルの追加・更新")
+        elif sub_action == "問題マスタ・添付ファイルの編集・削除":
+            st.subheader("問題定義の修正 & 添付ファイルの更新・削除")
             if problems_df.empty:
                 st.info("登録済みの問題がありません。")
             else:
@@ -1077,13 +997,34 @@ if load_success:
                 edit_unit = st.text_input("単元名", value=target_p["unit"])
                 edit_title = st.text_input("問題名", value=target_p["title"])
 
+                st.write("---")
+                st.write("**📎 添付ファイルの管理**")
+
                 curr_file_id = str(target_p.get("file_id", "")).strip()
                 curr_file_name = str(target_p.get("file_name", "")).strip()
-                if curr_file_id and curr_file_id.lower() not in ["nan", "none", ""]:
-                    st.caption(f"現在の添付ファイル: `{curr_file_name}`（ID: {curr_file_id}）")
+                has_file = bool(curr_file_id and curr_file_id.lower() not in ["nan", "none", ""])
+
+                p_idx = problems_df[problems_df["problem_id"] == selected_p_id].index
+
+                if has_file:
+                    st.success(f"現在添付中: **{curr_file_name}**")
+                    col_file_view, col_file_del = st.columns([1, 1])
+                    with col_file_view:
+                        st.link_button("🌐 Google ドライブで開く", f"https://drive.google.com/file/d/{curr_file_id}/view")
+                    with col_file_del:
+                        # 添付資料のみの削除処理
+                        if st.button("🗑️ 添付ファイルのみを削除する"):
+                            with st.spinner("ドライブからファイルをゴミ箱へ移動中..."):
+                                delete_file_from_drive(curr_file_id)
+                                problems_df.loc[p_idx, "file_id"] = ""
+                                problems_df.loc[p_idx, "file_name"] = ""
+                                save_problems_df(problems_df)
+                                st.success("添付ファイルを削除しました。")
+                                st.rerun()
                 else:
                     st.caption("現在ファイルは添付されていません。")
 
+                # ファイル差し替え / 新規アップロード
                 new_edit_file = st.file_uploader(
                     "新しいファイルに差し替える / 新規追加（JPEG, PNG, PDF）",
                     type=["jpg", "jpeg", "png", "pdf"],
@@ -1093,8 +1034,7 @@ if load_success:
                 st.write("")
                 col_psav, col_pdel = st.columns(2)
                 with col_psav:
-                    if st.button("更新を保存"):
-                        p_idx = problems_df[problems_df["problem_id"] == selected_p_id].index
+                    if st.button("問題定義・添付の更新を保存"):
                         problems_df.loc[p_idx, "subject"] = edit_subject.strip()
                         problems_df.loc[p_idx, "folder_path"] = "/" + edit_folder.strip("/") if edit_folder.strip("/") else "/"
                         problems_df.loc[p_idx, "unit"] = edit_unit.strip()
@@ -1103,6 +1043,10 @@ if load_success:
                         if new_edit_file:
                             target_drive_folder = st.secrets["connections"]["gsheets"].get("drive_folder_id", "")
                             with st.spinner("新しいファイルを Google ドライブへ保存中..."):
+                                # 旧ファイルが存在する場合は事前にドライブのゴミ箱へ移動
+                                if has_file:
+                                    delete_file_from_drive(curr_file_id)
+
                                 uploaded_res = upload_file_to_drive(new_edit_file, target_drive_folder)
                                 problems_df.loc[p_idx, "file_id"] = uploaded_res.get("id", "")
                                 problems_df.loc[p_idx, "file_name"] = new_edit_file.name
@@ -1112,7 +1056,11 @@ if load_success:
                         st.rerun()
 
                 with col_pdel:
-                    if st.button("この問題を削除"):
+                    if st.button("この問題を完全に削除"):
+                        # 問題削除時に添付ファイルもドライブのゴミ箱へ移動
+                        if has_file:
+                            delete_file_from_drive(curr_file_id)
+
                         updated_p = problems_df[problems_df["problem_id"] != selected_p_id]
                         save_problems_df(updated_p)
                         if not attempts_df.empty:
