@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import base64
 import html
 import json
@@ -66,10 +66,9 @@ def delete_file_from_drive(file_id: str):
         st.warning(f"Google ドライブ上の旧ファイル削除時に警告が発生しました: {e}")
 
 # -----------------------------------------------------------------------------
-# 添付ファイルデータ構造化・後方互換性ヘルパー
+# 添付ファイルデータ構造化ヘルパー
 # -----------------------------------------------------------------------------
 def parse_attached_files(raw_file_id: str, raw_file_name: str) -> list:
-    """単一ファイル（旧形式）と複数ファイル（JSON形式）を透過的にリストへ変換"""
     if not raw_file_id or str(raw_file_id).lower() in ["nan", "none", ""]:
         return []
     val = str(raw_file_id).strip()
@@ -78,19 +77,19 @@ def parse_attached_files(raw_file_id: str, raw_file_name: str) -> list:
             return json.loads(val)
         except Exception:
             pass
-    # 旧形式（単一ファイルの ID とファイル名）
     name = str(raw_file_name).strip() if (raw_file_name and str(raw_file_name).lower() not in ["nan", "none"]) else "添付資料"
     return [{"id": val, "name": name}]
 
 def dump_attached_files(files_list: list) -> str:
-    """ファイルリストをスプレッドシート保存用 JSON 文字列に変換"""
     if not files_list:
         return ""
     return json.dumps(files_list, ensure_ascii=False)
 
+# -----------------------------------------------------------------------------
+# データ取得・保存関数（キャッシュ制御）
+# -----------------------------------------------------------------------------
 @st.cache_data(ttl=60)
 def get_problems_df() -> pd.DataFrame:
-    """問題マスタ（problems シート）をキャッシュして取得"""
     conn = get_connection()
     df = conn.read(worksheet="problems")
     if df is None or df.empty:
@@ -123,7 +122,6 @@ def get_problems_df() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def get_attempts_df() -> pd.DataFrame:
-    """演習履歴（attempts シート）をキャッシュして取得"""
     conn = get_connection()
     df = conn.read(worksheet="attempts")
     if df is None or df.empty:
@@ -135,6 +133,23 @@ def get_attempts_df() -> pd.DataFrame:
     df = df[df["attempt_id"].astype(str).str.strip() != ""]
     return df
 
+@st.cache_data(ttl=60)
+def get_todos_df() -> pd.DataFrame:
+    """ToDoタスクマスタ（todos シート）をキャッシュして取得（未作成時も安全にフォールバック）"""
+    try:
+        conn = get_connection()
+        df = conn.read(worksheet="todos")
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["todo_id", "problem_id", "subject", "unit", "task_desc", "due_date", "status", "created_at"])
+        df = df.dropna(how="all")
+        for col in ["todo_id", "problem_id", "subject", "unit", "task_desc", "due_date", "status", "created_at"]:
+            if col not in df.columns:
+                df[col] = ""
+        df = df[df["todo_id"].astype(str).str.strip() != ""]
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["todo_id", "problem_id", "subject", "unit", "task_desc", "due_date", "status", "created_at"])
+
 def save_problems_df(df: pd.DataFrame):
     conn = get_connection()
     conn.update(worksheet="problems", data=df)
@@ -143,6 +158,11 @@ def save_problems_df(df: pd.DataFrame):
 def save_attempts_df(df: pd.DataFrame):
     conn = get_connection()
     conn.update(worksheet="attempts", data=df)
+    st.cache_data.clear()
+
+def save_todos_df(df: pd.DataFrame):
+    conn = get_connection()
+    conn.update(worksheet="todos", data=df)
     st.cache_data.clear()
 
 def fetch_aggregated_data(problems_df: pd.DataFrame, attempts_df: pd.DataFrame) -> pd.DataFrame:
@@ -272,7 +292,7 @@ st.markdown("""
         background-color: transparent !important;
         border: none !important;
         padding: 12px 16px !important;
-        font-size: 16px !important;
+        font-size: 15px !important;
         font-weight: 700;
         color: #71717A;
         white-space: nowrap;
@@ -492,9 +512,6 @@ st.markdown("""
         font-weight: 800;
         color: #1F2937;
         margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
     }
     .file-item-chip {
         display: inline-flex;
@@ -508,10 +525,6 @@ st.markdown("""
         border-radius: 8px;
         text-decoration: none;
         margin: 4px 6px 4px 0;
-        transition: background-color 0.2s ease;
-    }
-    .file-item-chip:hover {
-        background-color: #1D4ED8;
     }
     .history-header {
         font-size: 13px;
@@ -566,6 +579,79 @@ st.markdown("""
         word-break: break-all;
     }
 
+    /* ToDo カードデザイン */
+    .todo-card {
+        background: #FFFFFF;
+        border-radius: 16px;
+        border: 1px solid #ECECEC;
+        padding: 18px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .todo-card.done {
+        background: #FAFAFA;
+        border-color: #E5E7EB;
+        opacity: 0.75;
+    }
+    .todo-card-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .todo-scope-pill {
+        background: #F1F2F5;
+        color: #374151;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 8px;
+    }
+    .badge-due-danger {
+        background: #FEE2E2;
+        color: #DC2626;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 8px;
+    }
+    .badge-due-warning {
+        background: #FEF3C7;
+        color: #D97706;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 8px;
+    }
+    .badge-due-safe {
+        background: #EFF6FF;
+        color: #2563EB;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 8px;
+    }
+    .badge-due-done {
+        background: #E5E7EB;
+        color: #6B7280;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 3px 10px;
+        border-radius: 8px;
+    }
+    .todo-desc-text {
+        font-size: 16px;
+        font-weight: 800;
+        color: #1A1A1A;
+        line-height: 1.5;
+        margin-bottom: 12px;
+    }
+    .todo-desc-text.done {
+        text-decoration: line-through;
+        color: #9CA3AF;
+    }
+
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -591,7 +677,7 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 st.markdown("""
 <div class="nintendo-header">
-    <div class="nintendo-badge">Drive + Explorer</div>
+    <div class="nintendo-badge">Study Master</div>
     <div class="nintendo-title">演習ダッシュボード</div>
 </div>
 """, unsafe_allow_html=True)
@@ -607,6 +693,7 @@ if "created_folders" not in st.session_state:
 try:
     problems_df = get_problems_df()
     attempts_df = get_attempts_df()
+    todos_df = get_todos_df()
     load_success = True
 except Exception as e:
     load_success = False
@@ -615,7 +702,12 @@ except Exception as e:
         st.rerun()
 
 if load_success:
-    tab_catalog, tab_entry, tab_manage = st.tabs(["📁 エクスプローラー", "✏️ 演習記録", "⚙️ マスタ管理"])
+    tab_catalog, tab_todo, tab_entry, tab_manage = st.tabs([
+        "📁 エクスプローラー",
+        "✅ ToDoタスク",
+        "✏️ 演習記録",
+        "⚙️ マスタ管理"
+    ])
 
     # -----------------------------------------------------------------------------
     # タブ 1: エクスプローラー
@@ -720,7 +812,6 @@ if load_success:
 
             st.write("")
 
-            # サブフォルダ一覧表示
             sub_folders = set()
             for p in all_known_paths:
                 p_clean = "/" + p.strip("/") if p.strip("/") else "/"
@@ -744,7 +835,6 @@ if load_success:
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-            # 問題カード一覧表示
             if current_problems.empty and not sub_folders:
                 st.info("このフォルダには問題がありません。")
             elif not current_problems.empty:
@@ -758,12 +848,8 @@ if load_success:
                     unit_s = html.escape(str(r["unit"]))
                     p_id_s = html.escape(p_id_raw)
 
-                    # 複数添付ファイルの解析
                     files_list = parse_attached_files(r.get("file_id", ""), r.get("file_name", ""))
-                    file_badge = ""
-                    if files_list:
-                        num_f = len(files_list)
-                        file_badge = f'<span class="tag-file-badge">📎 資料 ({num_f}件)</span>'
+                    file_badge = f'<span class="tag-file-badge">📎 資料 ({len(files_list)}件)</span>' if files_list else ""
 
                     if pd.isna(r["accuracy"]):
                         acc_text = "未実施"
@@ -788,7 +874,6 @@ if load_success:
                         status_badge = '<span class="safe-pill">定着中</span>'
                         elapsed_text = f"{int(r['elapsed_days'])}日前"
 
-                    # 複数添付ファイルの描画ブロック
                     file_block_html = ""
                     if files_list:
                         chips_html = ""
@@ -818,7 +903,6 @@ if load_success:
                         </div>
                         """
 
-                    # 演習履歴
                     p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy() if not attempts_df.empty else pd.DataFrame()
                     history_rows_html = ""
                     if p_att.empty:
@@ -891,7 +975,210 @@ if load_success:
                 st.markdown(clean_cards_html, unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------------
-    # タブ 2: 演習ログ登録
+    # タブ 2: ToDoタスク機能（New Feature）
+    # -----------------------------------------------------------------------------
+    with tab_todo:
+        st.subheader("学習 ToDo タスク管理")
+
+        # --- サマリーバーの集計 ---
+        today_date = date.today()
+        if not todos_df.empty:
+            open_todos = todos_df[todos_df["status"] != "done"].copy()
+            done_todos = todos_df[todos_df["status"] == "done"].copy()
+
+            def is_overdue(d_str):
+                try:
+                    target_d = datetime.strptime(str(d_str)[:10], "%Y-%m-%d").date()
+                    return (today_date - target_d).days > 0
+                except Exception:
+                    return False
+
+            overdue_count = len(open_todos[open_todos["due_date"].apply(is_overdue)])
+            total_open = len(open_todos)
+            total_done = len(done_todos)
+        else:
+            total_open = 0
+            overdue_count = 0
+            total_done = 0
+
+        todo_summary_html = f"""
+        <div class="summary-grid">
+            <div class="summary-card primary">
+                <div class="summary-label">進行中タスク</div>
+                <div class="summary-value">{total_open} <span style="font-size:13px;">件</span></div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">期限切れ警告</div>
+                <div class="summary-value" style="color: {'#DC2626' if overdue_count > 0 else '#1A1A1A'};">{overdue_count} <span style="font-size:13px;">件</span></div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">完了済み</div>
+                <div class="summary-value">{total_done} <span style="font-size:13px;">件</span></div>
+            </div>
+        </div>
+        """
+        st.markdown("\n".join(line.strip() for line in todo_summary_html.splitlines()), unsafe_allow_html=True)
+
+        # --- 新規 ToDo タスク作成パネル ---
+        with st.expander("➕ 新しい ToDo タスクを計画する", expanded=False):
+            if problems_df.empty:
+                st.warning("先に問題マスタを追加してください。")
+            else:
+                target_scope = st.radio("タスクの対象範囲", ["特定の問題を指定", "科目・単元全体を指定"], horizontal=True)
+
+                c_tsub, c_tunit = st.columns(2)
+                with c_tsub:
+                    todo_sub = st.selectbox("対象科目", problems_df["subject"].unique(), key="todo_sub_sel")
+                with c_tunit:
+                    todo_units = problems_df[problems_df["subject"] == todo_sub]["unit"].unique()
+                    todo_unit = st.selectbox("対象単元", todo_units, key="todo_unit_sel")
+
+                selected_p_id_for_todo = ""
+                if target_scope == "特定の問題を指定":
+                    cand_probs = problems_df[(problems_df["subject"] == todo_sub) & (problems_df["unit"] == todo_unit)]
+                    prob_choices = {
+                        f"[{row['problem_id']}] {row['title']}": row['problem_id']
+                        for _, row in cand_probs.iterrows()
+                    }
+                    if prob_choices:
+                        sel_p_label = st.selectbox("対象問題", list(prob_choices.keys()), key="todo_prob_sel")
+                        selected_p_id_for_todo = prob_choices[sel_p_label]
+                    else:
+                        st.caption("この単元には登録された問題がありません。")
+
+                col_tdue, _ = st.columns([1, 1])
+                with col_tdue:
+                    target_due = st.date_input("完了目標日（いつまでに）", value=today_date + timedelta(days=3))
+
+                target_desc = st.text_input("達成目標・タスク内容（何を終わらせるか）", placeholder="例: ノーヒントで解答を再現できるようにする / 公式証明のまとめ")
+
+                st.write("")
+                if st.button("この目標を ToDo に追加する"):
+                    if target_desc.strip():
+                        if todos_df.empty or "todo_id" not in todos_df.columns:
+                            next_todo_id = 1
+                        else:
+                            exist_t_ids = pd.to_numeric(todos_df["todo_id"], errors="coerce").dropna()
+                            next_todo_id = int(exist_t_ids.max() + 1) if not exist_t_ids.empty else 1
+
+                        new_todo_row = pd.DataFrame([{
+                            "todo_id": next_todo_id,
+                            "problem_id": selected_p_id_for_todo,
+                            "subject": todo_sub,
+                            "unit": todo_unit,
+                            "task_desc": target_desc.strip(),
+                            "due_date": target_due.strftime("%Y-%m-%d"),
+                            "status": "open",
+                            "created_at": today_date.strftime("%Y-%m-%d")
+                        }])
+
+                        updated_todos = pd.concat([todos_df, new_todo_row], ignore_index=True)
+                        save_todos_df(updated_todos)
+                        st.success("新しい ToDo タスクを追加しました。")
+                        st.rerun()
+                    else:
+                        st.warning("タスク内容を入力してください。")
+
+        st.write("---")
+
+        # --- タスク一覧とステータス切り替え ---
+        if todos_df.empty:
+            st.info("現在登録されている ToDo タスクはありません。上のフォームから目標を追加してください。")
+        else:
+            filter_mode = st.radio("表示切り替え", ["進行中のみ", "すべて", "完了済み"], horizontal=True)
+
+            display_todos = todos_df.copy()
+            if filter_mode == "進行中のみ":
+                display_todos = display_todos[display_todos["status"] != "done"]
+            elif filter_mode == "完了済み":
+                display_todos = display_todos[display_todos["status"] == "done"]
+
+            # ソート（期限日が近い順）
+            display_todos = display_todos.sort_values(by=["due_date", "todo_id"], ascending=[True, True])
+
+            if display_todos.empty:
+                st.caption("該当するタスクはありません。")
+            else:
+                for _, t_row in display_todos.iterrows():
+                    t_id_str = str(t_row["todo_id"])
+                    is_done = str(t_row.get("status", "open")).lower() == "done"
+                    due_str = str(t_row["due_date"])
+                    desc_s = html.escape(str(t_row["task_desc"]))
+                    sub_s = html.escape(str(t_row["subject"]))
+                    unit_s = html.escape(str(t_row["unit"]))
+                    p_id_raw = str(t_row.get("problem_id", "")).strip()
+
+                    # 紐付く問題タイトル
+                    p_title_str = ""
+                    if p_id_raw and p_id_raw.lower() not in ["nan", "none", ""]:
+                        match_prob = problems_df[problems_df["problem_id"] == p_id_raw]
+                        if not match_prob.empty:
+                            p_title_str = f"[{p_id_raw}] " + match_prob.iloc[0]["title"]
+                        else:
+                            p_title_str = f"[{p_id_raw}]"
+
+                    # 期限日バッジの計算
+                    try:
+                        due_d = datetime.strptime(due_str[:10], "%Y-%m-%d").date()
+                        diff_days = (due_d - today_date).days
+                    except Exception:
+                        diff_days = 99
+
+                    if is_done:
+                        due_badge = '<span class="badge-due-done">✓ 達成済み</span>'
+                    elif diff_days < 0:
+                        due_badge = f'<span class="badge-due-danger">⚠️ 期限切れ ({abs(diff_days)}日前)</span>'
+                    elif diff_days == 0:
+                        due_badge = '<span class="badge-due-warning">🔥 本日締切</span>'
+                    elif diff_days == 1:
+                        due_badge = '<span class="badge-due-warning">⏳ 明日締切</span>'
+                    else:
+                        due_badge = f'<span class="badge-due-safe">📅 残り {diff_days}日 ({due_str})</span>'
+
+                    scope_label = f"📁 {sub_s} / {unit_s}"
+                    if p_title_str:
+                        scope_label += f" → 📄 {p_title_str}"
+
+                    # カード描画
+                    card_class = "todo-card done" if is_done else "todo-card"
+                    desc_class = "todo-desc-text done" if is_done else "todo-desc-text"
+
+                    st.markdown(f"""
+                    <div class="{card_class}">
+                        <div class="todo-card-top">
+                            <span class="todo-scope-pill">{scope_label}</span>
+                            {due_badge}
+                        </div>
+                        <div class="{desc_class}">{desc_s}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    c_act1, c_act2, _ = st.columns([1.2, 1, 2])
+                    t_idx = todos_df[todos_df["todo_id"].astype(str) == t_id_str].index
+
+                    with c_act1:
+                        if not is_done:
+                            if st.button("✓ 完了にする", key=f"btn_done_{t_id_str}"):
+                                todos_df.loc[t_idx, "status"] = "done"
+                                save_todos_df(todos_df)
+                                st.success("タスクを完了にしました！お疲れ様でした。")
+                                st.rerun()
+                        else:
+                            if st.button("↩️ 未完了に戻す", key=f"btn_reopen_{t_id_str}"):
+                                todos_df.loc[t_idx, "status"] = "open"
+                                save_todos_df(todos_df)
+                                st.info("タスクを未完了に戻しました。")
+                                st.rerun()
+                    with c_act2:
+                        if st.button("🗑️ 削除", key=f"btn_del_todo_{t_id_str}"):
+                            updated_td = todos_df[todos_df["todo_id"].astype(str) != t_id_str]
+                            save_todos_df(updated_td)
+                            st.warning("タスクを削除しました。")
+                            st.rerun()
+                    st.write("")
+
+    # -----------------------------------------------------------------------------
+    # タブ 3: 演習ログ登録
     # -----------------------------------------------------------------------------
     with tab_entry:
         st.subheader("演習結果を記録する")
@@ -948,7 +1235,7 @@ if load_success:
                     st.error(f"保存エラー: {ex}")
 
     # -----------------------------------------------------------------------------
-    # タブ 3: マスタ管理（複数ファイル対応）
+    # タブ 4: マスタ管理
     # -----------------------------------------------------------------------------
     with tab_manage:
         sub_action = st.radio(
@@ -974,7 +1261,6 @@ if load_success:
             new_unit = st.text_input("単元名（例: ガウスの法則）")
             new_title = st.text_input("問題名（例: 同軸円筒導体の電界計算）")
 
-            # 複数ファイルアップロード対応
             st.write("---")
             uploaded_files = st.file_uploader(
                 "📎 PDF や画像ファイルをアップロード（複数選択可）",
@@ -1109,7 +1395,6 @@ if load_success:
 
                 with col_pdel:
                     if st.button("この問題を完全に削除"):
-                        # 問題削除時にすべての添付ファイルをドライブのゴミ箱へ移動
                         if curr_files:
                             for f_obj in curr_files:
                                 delete_file_from_drive(f_obj.get("id", ""))
