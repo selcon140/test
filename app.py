@@ -854,7 +854,8 @@ if load_success:
 
                 st.caption(f"現在のディレクトリ: `{st.session_state.current_folder}`")
 
-            all_known_paths = sorted(list(set(data["folder_path"].unique()).union(st.session_state.created_folders)))
+                # ホーム（"/"）を必ず候補に含める
+            all_known_paths = sorted(list(set(data["folder_path"].unique()).union(st.session_state.created_folders).union({"/"})))
 
             # 対象問題の抽出（全展開モードなら全データ、通常なら直下のみ）
             if is_all_view:
@@ -862,11 +863,11 @@ if load_success:
             else:
                 current_problems = data[data["folder_path"] == curr].copy()
 
-                # 上部ツールバー（フォルダ操作・移動）
+            # 上部ツールバー（フォルダ操作・移動・削除）
             with st.expander("🛠️ フォルダ操作・問題の移動（上部ツールバー）", expanded=False):
                 tb_action = st.radio(
                     "操作を選択",
-                    ["📂 問題を別のフォルダへ移動", "📁 フォルダを別のフォルダへ移動", "➕ 新しいフォルダを作成"],
+                    ["📂 問題を別のフォルダへ移動", "📁 フォルダを別のフォルダへ移動", "➕ 新しいフォルダを作成", "🗑️ フォルダを削除"],
                     horizontal=True
                 )
 
@@ -889,7 +890,11 @@ if load_success:
                             mv_dest_mode = st.radio("移動先の指定", ["既存フォルダから選択", "新規パス入力"], horizontal=True)
                         with col_dest2:
                             if mv_dest_mode == "既存フォルダから選択":
-                                dest_folder = st.selectbox("移動先フォルダ", all_known_paths)
+                                dest_folder = st.selectbox(
+                                    "移動先フォルダ",
+                                    all_known_paths,
+                                    format_func=lambda x: "🏠 ホーム (/)" if x == "/" else f"📁 {x}"
+                                )
                             else:
                                 dest_folder = st.text_input("新規フォルダパス（例: /電磁気学/ガウスの法則）", value="/")
 
@@ -905,7 +910,6 @@ if load_success:
                                 st.error(f"移動エラー: {ex}")
 
                 elif tb_action == "📁 フォルダを別のフォルダへ移動":
-                    # ルート以外の移動可能フォルダを抽出
                     movable_folders = [p for p in all_known_paths if p != "/"]
                     if not movable_folders:
                         st.caption("移動可能なフォルダが存在しません。先にフォルダを作成してください。")
@@ -914,21 +918,24 @@ if load_success:
                         with col_f_src:
                             src_folder = st.selectbox("移動させるフォルダ", movable_folders, key="sel_src_folder")
                         with col_f_dest:
-                            # 自分自身を除外した候補一覧（ルート「/」を指定すればホーム直下に移動可能）
+                            # ホーム（"/"）を必ず含め、分かりやすく表示
                             dest_parent_candidates = [p for p in all_known_paths if p != src_folder]
-                            dest_parent = st.selectbox("移動先の親フォルダ", dest_parent_candidates, key="sel_dest_parent")
+                            dest_parent = st.selectbox(
+                                "移動先の親フォルダ",
+                                dest_parent_candidates,
+                                format_func=lambda x: "🏠 ホーム (/)" if x == "/" else f"📁 {x}",
+                                key="sel_dest_parent"
+                            )
 
                         st.write("")
                         if st.button("🚀 フォルダを移動する", key="btn_move_folder"):
-                            # 循環参照（Cyclic reference）防止チェック
-                            if dest_parent.startswith(src_folder + "/"):
+                            if dest_parent != "/" and dest_parent.startswith(src_folder + "/"):
                                 st.error("自分の子フォルダ（内部階層）の中にフォルダを移動することはできません。")
                             else:
                                 try:
                                     folder_name = posixpath.basename(src_folder.rstrip("/"))
-                                    new_folder_path = posixpath.join(dest_parent, folder_name)
+                                    new_folder_path = "/" + folder_name if dest_parent == "/" else posixpath.join(dest_parent, folder_name)
 
-                                    # 1. 配下の全問題の folder_path を再帰的（Recursive）に更新
                                     def rewrite_path(old_p):
                                         if old_p == src_folder:
                                             return new_folder_path
@@ -939,13 +946,11 @@ if load_success:
                                     problems_df["folder_path"] = problems_df["folder_path"].apply(rewrite_path)
                                     save_problems_df(problems_df)
 
-                                    # 2. セッションの空フォルダリストも追従更新
                                     new_created = set()
                                     for p in st.session_state.created_folders:
                                         new_created.add(rewrite_path(p))
                                     st.session_state.created_folders = new_created
 
-                                    # 3. 現在開いている階層が移動対象だった場合は自動追従
                                     if st.session_state.current_folder == src_folder or st.session_state.current_folder.startswith(src_folder + "/"):
                                         st.session_state.current_folder = rewrite_path(st.session_state.current_folder)
 
@@ -959,10 +964,52 @@ if load_success:
                     if st.button("この階層に作成", key="btn_create_folder_upper"):
                         if new_folder_name.strip():
                             base_dir = "/" if is_all_view else st.session_state.current_folder
-                            target_dir = posixpath.join(base_dir, new_folder_name.strip())
+                            target_dir = "/" + new_folder_name.strip().strip("/") if base_dir == "/" else posixpath.join(base_dir, new_folder_name.strip())
                             st.session_state.created_folders.add(target_dir)
                             st.success(f"フォルダ「{new_folder_name.strip()}」を作成しました。")
                             st.rerun()
+
+                elif tb_action == "🗑️ フォルダを削除":
+                    deletable_folders = [p for p in all_known_paths if p != "/"]
+                    if not deletable_folders:
+                        st.caption("削除可能なフォルダが存在しません。")
+                    else:
+                        del_target_folder = st.selectbox("削除するフォルダを選択", deletable_folders, key="sel_del_folder")
+
+                        # 該当フォルダおよび配下の問題数を算出
+                        affected_count = len(problems_df[
+                            (problems_df["folder_path"] == del_target_folder) |
+                            (problems_df["folder_path"].str.startswith(del_target_folder + "/"))
+                        ])
+                        st.warning(f"⚠️ フォルダ「{del_target_folder}」を削除します。配下にある問題（{affected_count}問）はすべて安全に「🏠 ホーム (/)」へ移動されます。")
+
+                        st.write("")
+                        if st.button("🗑️ このフォルダを削除する", key="btn_execute_del_folder"):
+                            try:
+                                # 配下の全問題をホーム（"/"）へ退避
+                                def move_to_home(p):
+                                    if p == del_target_folder or p.startswith(del_target_folder + "/"):
+                                        return "/"
+                                    return p
+
+                                problems_df["folder_path"] = problems_df["folder_path"].apply(move_to_home)
+                                save_problems_df(problems_df)
+
+                                # 空フォルダリストからも除去
+                                st.session_state.created_folders = {
+                                    p for p in st.session_state.created_folders
+                                    if p != del_target_folder and not p.startswith(del_target_folder + "/")
+                                }
+
+                                # 現在開いていた階層が削除対象ならホームへ戻す
+                                if st.session_state.current_folder == del_target_folder or st.session_state.current_folder.startswith(del_target_folder + "/"):
+                                    st.session_state.current_folder = "/"
+
+                                st.success(f"フォルダ「{del_target_folder}」を削除しました（問題はホームへ退避しました）。")
+                                st.rerun()
+                            except Exception as ex:
+                                st.error(f"フォルダ削除エラー: {ex}")
+
 
             st.write("")
 
@@ -1743,7 +1790,8 @@ if load_success:
         if sub_action == "新規問題の追加（複数ファイル添付対応）":
             st.subheader("新規問題の追加")
             existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
-            all_known_paths = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders)))
+            # ホーム（"/"）を必ず含める
+            all_known_paths = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders).union({"/"})))
 
             new_id = st.text_input("問題ID（例: EM-001）")
             sub_mode = st.radio("科目の指定方法", ["既存から選択", "新規入力"], horizontal=True)
@@ -1752,7 +1800,11 @@ if load_success:
             else:
                 new_subject = st.text_input("新規科目名")
 
-            target_f_path = st.selectbox("配置フォルダ", all_known_paths)
+            target_f_path = st.selectbox(
+                "配置フォルダ",
+                all_known_paths,
+                format_func=lambda x: "🏠 ホーム (/)" if x == "/" else f"📁 {x}"
+            )
 
             # 選択された科目に属する既存単元（無ければ全登録単元）を抽出
             existing_units = []
