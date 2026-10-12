@@ -163,9 +163,6 @@ st.markdown("""
         font-weight: 800;
         color: #E60012;
         margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
     .error-card-desc {
         font-size: 14px;
@@ -213,6 +210,8 @@ st.markdown("""
         background-color: #E60012;
         border-radius: 3px 3px 0 0;
     }
+
+    /* サマリーカード */
     .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -245,6 +244,8 @@ st.markdown("""
         font-size: 20px;
         font-weight: 800;
     }
+
+    /* 問題カードグリッド */
     .cards-grid {
         display: grid;
         grid-template-columns: 1fr;
@@ -256,20 +257,41 @@ st.markdown("""
             grid-template-columns: repeat(2, 1fr);
         }
     }
-    .nintendo-card {
+
+    /* =========================================================================
+       ★ 任天堂風 クリック展開アコーディオンカード（Accordion Card）
+       ========================================================================= */
+    details.nintendo-accordion {
         background: #FFFFFF;
         border-radius: 18px;
-        padding: 20px;
         border: 1px solid #ECECEC;
         box-shadow: 0 3px 8px rgba(0, 0, 0, 0.03);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+        overflow: hidden;
+        transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s cubic-bezier(0.25, 1, 0.5, 1);
     }
-    .nintendo-card:active {
-        transform: scale(0.985);
+    details.nintendo-accordion[open] {
+        border-color: #E60012;
+        box-shadow: 0 10px 24px -4px rgba(230, 0, 18, 0.12);
     }
+    @media (hover: hover) and (pointer: fine) {
+        details.nintendo-accordion:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 18px -4px rgba(0, 0, 0, 0.08);
+        }
+    }
+
+    /* クリック可能なカード表側 */
+    summary.nintendo-card-summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 20px 20px 14px 20px;
+        outline: none;
+        user-select: none;
+    }
+    summary.nintendo-card-summary::-webkit-details-marker {
+        display: none;
+    }
+
     .card-top {
         display: flex;
         align-items: center;
@@ -296,6 +318,8 @@ st.markdown("""
         line-height: 1.4;
         margin-bottom: 16px;
     }
+
+    /* 正答率バー */
     .progress-wrapper {
         margin-bottom: 14px;
     }
@@ -322,6 +346,8 @@ st.markdown("""
     .fill-orange { background-color: #F59E0B; }
     .fill-red { background-color: #EF4444; }
     .fill-gray { background-color: #D1D5DB; }
+
+    /* カード下部ステータス */
     .card-footer {
         display: flex;
         align-items: center;
@@ -348,6 +374,103 @@ st.markdown("""
         padding: 4px 10px;
         border-radius: 12px;
     }
+
+    /* 開閉ガイドヒント（タップ可能であることを示すバー） */
+    .toggle-hint-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #A1A1AA;
+        padding-top: 12px;
+        margin-top: 12px;
+        border-top: 1px dashed #EAEAEA;
+        transition: color 0.2s ease;
+    }
+    details.nintendo-accordion[open] .toggle-hint-bar {
+        color: #E60012;
+    }
+    .toggle-icon {
+        display: inline-block;
+        transition: transform 0.25s ease;
+        font-size: 11px;
+    }
+    details.nintendo-accordion[open] .toggle-icon {
+        transform: rotate(180deg);
+    }
+
+    /* 展開される演習履歴リスト */
+    .history-drawer {
+        background: #F8F9FA;
+        border-top: 1px solid #EBEBEB;
+        padding: 16px 20px 20px 20px;
+    }
+    .history-header {
+        font-size: 13px;
+        font-weight: 800;
+        color: #52525B;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .history-row {
+        background: #FFFFFF;
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 8px;
+        border: 1px solid #EAEAEA;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+    }
+    .history-row:last-child {
+        margin-bottom: 0;
+    }
+    .history-meta-line {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .history-date {
+        font-size: 13px;
+        font-weight: 700;
+        color: #27272A;
+    }
+    .badge-pass {
+        background: #DCFCE7;
+        color: #16A34A;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 2px 8px;
+        border-radius: 6px;
+    }
+    .badge-fail {
+        background: #FEE2E2;
+        color: #DC2626;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 2px 8px;
+        border-radius: 6px;
+    }
+    .history-memo-box {
+        font-size: 13px;
+        color: #4B5563;
+        background: #F3F4F6;
+        padding: 8px 10px;
+        border-radius: 8px;
+        margin-top: 8px;
+        line-height: 1.5;
+        word-break: break-all;
+    }
+    .history-empty-text {
+        font-size: 13px;
+        color: #A1A1AA;
+        text-align: center;
+        padding: 10px 0;
+    }
+
+    /* ボタン・フォームパーツ */
     .stButton > button {
         background-color: #E60012;
         color: #FFFFFF;
@@ -398,14 +521,13 @@ except Exception as e:
     load_success = False
     err_str = str(e)
 
-    # エラー種別の自動判定と分かりやすい案内文の作成
     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
         err_title = "通信制限（一時的な待機が必要です）"
         err_desc = "Google Sheets API の 1 分間あたりのアクセス制限（クォータ上限）に達しました。データは安全に保護されています。"
         err_action = "👉 画面を連打せず、<strong>約1分間待ってから</strong>下の「再読み込み」を押してください。"
     elif "WorksheetNotFound" in err_str:
         err_title = "ワークシートが見つかりません"
-        err_desc = "スプレッドシート内に必要なシート（タブ）が見つかりませんでした。"
+        err_desc = "スプレッドシート内に必要なシートが見つかりませんでした。"
         err_action = "👉 スプレッドシート下部に <strong>problems</strong> と <strong>attempts</strong> のシートが存在するか確認してください。"
     elif "Spreadsheet must not be None" in err_str or "Missing secrets" in err_str:
         err_title = "認証情報（Secrets）の設定不備"
@@ -414,13 +536,12 @@ except Exception as e:
     elif "403" in err_str or "PERMISSION_DENIED" in err_str:
         err_title = "アクセス権限がありません"
         err_desc = "サービスアカウントにスプレッドシートの共有権限が付与されていません。"
-        err_action = "👉 スプレッドシートの「共有」にサービスアカウント（client_email）を「編集者」として追加してください。"
+        err_action = "👉 スプレッドシートの「共有」にサービスアカウントを「編集者」として追加してください。"
     else:
         err_title = "スプレッドシートへの接続エラー"
         err_desc = "スプレッドシートとの通信中に問題が発生しました。"
         err_action = "👉 しばらく待ってから再読み込みするか、ネットワーク接続を確認してください。"
 
-    # 分かりやすい任天堂風エラーカードを出力
     error_html = f"""
     <div class="error-card">
         <div class="error-card-title">⚠️ {err_title}</div>
@@ -443,7 +564,7 @@ if load_success:
     tab_catalog, tab_entry, tab_manage = st.tabs(["📚 カタログ（一覧）", "✏️ 演習記録", "⚙️ マスタ管理"])
 
     # -----------------------------------------------------------------------------
-    # タブ 1: カタログ（問題一覧）
+    # タブ 1: カタログ（問題一覧 & 履歴展開）
     # -----------------------------------------------------------------------------
     with tab_catalog:
         data = fetch_aggregated_data(problems_df, attempts_df)
@@ -499,12 +620,14 @@ if load_success:
             elif sort_metric == "演習回数が少ない順":
                 filtered = filtered.sort_values(by="total_attempts", ascending=True)
 
+            # アコーディオン形式のカードグリッド生成
             cards_html = '<div class="cards-grid">\n'
             for _, r in filtered.iterrows():
+                p_id_raw = str(r["problem_id"])
                 title_s = html.escape(str(r["title"]))
                 subject_s = html.escape(str(r["subject"]))
                 unit_s = html.escape(str(r["unit"]))
-                p_id = html.escape(str(r["problem_id"]))
+                p_id_s = html.escape(p_id_raw)
 
                 if pd.isna(r["accuracy"]):
                     acc_text = "未実施"
@@ -534,11 +657,43 @@ if load_success:
                     status_badge = '<span class="safe-pill">定着中</span>'
                     elapsed_text = f"{int(r['elapsed_days'])}日前"
 
+                # 該当問題の演習履歴を抽出・生成
+                if not attempts_df.empty:
+                    p_att = attempts_df[attempts_df["problem_id"].astype(str) == p_id_raw].copy()
+                else:
+                    p_att = pd.DataFrame()
+
+                history_rows_html = ""
+                if p_att.empty:
+                    history_rows_html = '<div class="history-empty-text">まだ演習履歴がありません</div>'
+                else:
+                    p_att = p_att.sort_values(by=["attempt_date", "attempt_id"], ascending=[False, False])
+                    for _, att_row in p_att.iterrows():
+                        att_date_s = html.escape(str(att_row["attempt_date"]))
+                        is_corr = str(att_row["is_correct"]).strip() == "1"
+                        corr_badge = '<span class="badge-pass">◯ 正解</span>' if is_corr else '<span class="badge-fail">✕ 不正解</span>'
+
+                        memo_raw = str(att_row["memo"]).strip() if pd.notna(att_row["memo"]) else ""
+                        memo_html = ""
+                        if memo_raw and memo_raw.lower() != "nan" and memo_raw != "None":
+                            memo_html = f'<div class="history-memo-box">📝 {html.escape(memo_raw)}</div>'
+
+                        history_rows_html += f"""
+                        <div class="history-row">
+                            <div class="history-meta-line">
+                                <span class="history-date">{att_date_s}</span>
+                                {corr_badge}
+                            </div>
+                            {memo_html}
+                        </div>
+                        """
+
                 cards_html += f"""
-<div class="nintendo-card">
+<details class="nintendo-accordion">
+<summary class="nintendo-card-summary">
 <div>
 <div class="card-top">
-<span class="tag-subject">[{p_id}] {subject_s}</span>
+<span class="tag-subject">[{p_id_s}] {subject_s}</span>
 <span class="tag-unit">{unit_s}</span>
 </div>
 <div class="card-title">{title_s}</div>
@@ -557,8 +712,17 @@ if load_success:
 <span>最終: {elapsed_text} ({r['total_attempts']}回)</span>
 {status_badge}
 </div>
+<div class="toggle-hint-bar">
+<span>タップして演習履歴・メモを見る</span>
+<span class="toggle-icon">▼</span>
 </div>
 </div>
+</summary>
+<div class="history-drawer">
+<div class="history-header">📖 過去の演習履歴（{r['total_attempts']}件）</div>
+{history_rows_html}
+</div>
+</details>
 """
             cards_html += '\n</div>'
 
