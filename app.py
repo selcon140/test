@@ -1833,8 +1833,39 @@ if load_success:
                 target_p = problems_df[problems_df["problem_id"] == selected_p_id].iloc[0]
 
                 edit_subject = st.text_input("科目名", value=target_p["subject"])
-                edit_folder = st.text_input("フォルダパス", value=target_p.get("folder_path", "/"))
-                edit_unit = st.text_input("単元名", value=target_p["unit"])
+
+                # フォルダパス（選択式 または 直接入力）
+                all_known_folders = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders)))
+                curr_folder = target_p.get("folder_path", "/")
+                folder_candidates = sorted(list(set(all_known_folders).union({curr_folder})))
+
+                folder_mode = st.radio("フォルダパスの指定方法", ["既存から選択", "直接入力"], horizontal=True, key=f"edit_f_mode_{selected_p_id}")
+                if folder_mode == "既存から選択":
+                    f_default_idx = folder_candidates.index(curr_folder) if curr_folder in folder_candidates else 0
+                    edit_folder = st.selectbox("フォルダを選択", folder_candidates, index=f_default_idx, key=f"edit_f_sel_{selected_p_id}")
+                else:
+                    edit_folder = st.text_input("フォルダパス", value=curr_folder, key=f"edit_f_txt_{selected_p_id}")
+
+                # 単元名（選択式 または 新規入力）
+                curr_unit = str(target_p["unit"]).strip()
+                existing_units = []
+                if not problems_df.empty:
+                    if edit_subject:
+                        sub_units = problems_df[problems_df["subject"] == edit_subject.strip()]["unit"].unique()
+                        existing_units = sorted([u for u in sub_units if str(u).strip()])
+                    if not existing_units:
+                        existing_units = sorted([u for u in problems_df["unit"].unique() if str(u).strip()])
+                if curr_unit and curr_unit not in existing_units:
+                    existing_units.append(curr_unit)
+                    existing_units.sort()
+
+                unit_mode = st.radio("単元名の指定方法", ["既存から選択", "新規入力"], horizontal=True, key=f"edit_u_mode_{selected_p_id}")
+                if unit_mode == "既存から選択" and existing_units:
+                    u_default_idx = existing_units.index(curr_unit) if curr_unit in existing_units else 0
+                    edit_unit = st.selectbox("単元を選択", existing_units, index=u_default_idx, key=f"edit_u_sel_{selected_p_id}")
+                else:
+                    edit_unit = st.text_input("単元名", value=curr_unit, key=f"edit_u_txt_{selected_p_id}")
+
                 edit_title = st.text_input("問題名", value=target_p["title"])
 
                 st.write("---")
