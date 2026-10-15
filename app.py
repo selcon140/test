@@ -188,6 +188,26 @@ def save_problems_df(df: pd.DataFrame):
     conn.update(worksheet="problems", data=df)
     st.cache_data.clear()
 
+    @st.cache_data(ttl=60)
+def get_subjects_df() -> pd.DataFrame:
+    try:
+        conn = get_connection()
+        df = conn.read(worksheet="subjects")
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["subject"])
+        df = df.dropna(how="all")
+        if "subject" not in df.columns:
+            df["subject"] = ""
+        df = df[df["subject"].astype(str).str.strip() != ""]
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["subject"])
+
+def save_subjects_df(df: pd.DataFrame):
+    conn = get_connection()
+    conn.update(worksheet="subjects", data=df)
+    st.cache_data.clear()
+
 def save_attempts_df(df: pd.DataFrame):
     conn = get_connection()
     conn.update(worksheet="attempts", data=df)
@@ -769,6 +789,7 @@ try:
     todos_df = get_todos_df()
     books_df = get_books_df()
     book_logs_df = get_book_logs_df()
+    subjects_df = get_subjects_df()
     load_success = True
 except Exception as e:
     load_success = False
@@ -777,6 +798,10 @@ except Exception as e:
         st.rerun()
 
 if load_success:
+    all_subjects = sorted(list(set(
+        [s for s in problems_df["subject"].dropna().unique() if str(s).strip()] +
+        [s for s in subjects_df["subject"].dropna().unique() if str(s).strip()]
+    )))
     tab_catalog, tab_books, tab_todo, tab_entry, tab_manage = st.tabs([
         "📁 エクスプローラー",
         "📖 参考書進捗",
@@ -1779,6 +1804,7 @@ if load_success:
             "操作を選択",
             [
                 "新規問題の追加（複数ファイル添付対応）",
+                "科目の新規追加",
                 "問題マスタ・添付ファイルの編集・削除",
                 "演習履歴の編集・削除",
                 "参考書マスタの編集・削除"
@@ -1789,7 +1815,7 @@ if load_success:
 
         if sub_action == "新規問題の追加（複数ファイル添付対応）":
             st.subheader("新規問題の追加")
-            existing_subjects = list(problems_df["subject"].unique()) if not problems_df.empty else []
+            existing_subjects = all_subjects
             # ホーム（"/"）を必ず含める
             all_known_paths = sorted(list(set(problems_df["folder_path"].unique()).union(st.session_state.created_folders).union({"/"})))
 
@@ -1870,6 +1896,34 @@ if load_success:
                         st.rerun()
                 else:
                     st.error("必須項目（ID、科目、単元、問題名）をすべて入力してください。")
+
+        elif sub_action == "科目の新規追加":
+            st.subheader("科目の新規追加")
+            new_sub_input = st.text_input("新規科目名（例: 電気回路、制御工学）")
+
+            if st.button("この科目を登録する"):
+                clean_sub = new_sub_input.strip()
+                if clean_sub:
+                    if clean_sub in all_subjects:
+                        st.warning(f"科目「{clean_sub}」は既に登録されています。")
+                    else:
+                        new_sub_row = pd.DataFrame([{"subject": clean_sub}])
+                        updated_subs = pd.concat([subjects_df, new_sub_row], ignore_index=True)
+                        try:
+                            save_subjects_df(updated_subs)
+                            st.success(f"科目「{clean_sub}」を登録しました。")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"保存エラー（スプレッドシートに 'subjects' ワークシートが存在するか確認してください）: {ex}")
+                else:
+                    st.warning("科目名を入力してください。")
+
+            st.write("---")
+            st.write("**📋 登録済み科目一覧**")
+            if all_subjects:
+                st.write(", ".join([f"`{s}`" for s in all_subjects]))
+            else:
+                st.caption("登録されている科目はまだありません。")
 
         elif sub_action == "問題マスタ・添付ファイルの編集・削除":
             st.subheader("問題定義の修正 & 添付ファイルの追加・個別削除")
