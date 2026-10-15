@@ -188,7 +188,7 @@ def save_problems_df(df: pd.DataFrame):
     conn.update(worksheet="problems", data=df)
     st.cache_data.clear()
 
-    @st.cache_data(ttl=60)
+@st.cache_data(ttl=60)
 def get_subjects_df() -> pd.DataFrame:
     try:
         conn = get_connection()
