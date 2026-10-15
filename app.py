@@ -1820,7 +1820,7 @@ if load_success:
             "操作を選択",
             [
                 "新規問題の追加（複数ファイル添付対応）",
-                "科目の新規追加",
+                "科目の追加・削除",
                 "問題マスタ・添付ファイルの編集・削除",
                 "演習履歴の編集・削除",
                 "参考書マスタの編集・削除"
@@ -1913,7 +1913,7 @@ if load_success:
                 else:
                     st.error("必須項目（ID、科目、単元、問題名）をすべて入力してください。")
 
-        elif sub_action == "科目の新規追加":
+        elif sub_action == "科目の追加・削除":
             st.subheader("科目の新規追加")
             new_sub_input = st.text_input("新規科目名（例: 電気回路、制御工学）")
 
@@ -1930,12 +1930,36 @@ if load_success:
                             st.success(f"科目「{clean_sub}」を登録しました。")
                             st.rerun()
                         except Exception as ex:
-                            st.error(f"保存エラー（スプレッドシートに 'subjects' ワークシートが存在するか確認してください）: {ex}")
+                            st.error(f"保存エラー: {ex}")
                 else:
                     st.warning("科目名を入力してください。")
 
             st.write("---")
-            st.write("**📋 登録済み科目一覧**")
+            st.subheader("追加済み科目の削除")
+            # subjects ワークシートに登録されている科目リストを抽出
+            registered_subs = sorted([s for s in subjects_df["subject"].dropna().unique() if str(s).strip()])
+
+            if not registered_subs:
+                st.caption("削除可能な追加済み科目は登録されていません。")
+            else:
+                del_sub_target = st.selectbox("削除する科目を選択", registered_subs, key="sel_del_subject")
+
+                # 問題マスタ（problems_df）での使用有無を確認
+                used_in_problems = not problems_df.empty and (problems_df["subject"] == del_sub_target).any()
+                if used_in_problems:
+                    st.warning(f"⚠️ 科目「{del_sub_target}」は問題マスタに紐付く問題が存在します。ここで削除しても、問題マスタ側に残っている間は一覧に表示され続けます。")
+
+                if st.button("🗑️ この科目を削除する", key="btn_del_subject"):
+                    updated_subs = subjects_df[subjects_df["subject"] != del_sub_target]
+                    try:
+                        save_subjects_df(updated_subs)
+                        st.success(f"科目「{del_sub_target}」を削除しました。")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"削除エラー: {ex}")
+
+            st.write("---")
+            st.write("**📋 全科目一覧（登録済み・問題マスタ含む）**")
             if all_subjects:
                 st.write(", ".join([f"`{s}`" for s in all_subjects]))
             else:
