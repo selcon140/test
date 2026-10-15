@@ -1588,30 +1588,42 @@ if load_success:
         st.markdown("\n".join(line.strip() for line in todo_summary_html.splitlines()), unsafe_allow_html=True)
 
         with st.expander("➕ 新しい ToDo タスクを計画する", expanded=False):
-            if problems_df.empty:
-                st.warning("先に問題マスタを追加してください。")
+            if not all_subjects:
+                st.warning("先に科目を追加するか、問題マスタを登録してください。")
             else:
-                target_scope = st.radio("タスクの対象範囲", ["特定の問題を指定", "科目・単元全体を指定"], horizontal=True)
+                target_scope = st.radio("タスクの対象範囲", ["科目・単元全体を指定", "特定の問題を指定"], horizontal=True)
 
                 c_tsub, c_tunit = st.columns(2)
                 with c_tsub:
-                    todo_sub = st.selectbox("対象科目", problems_df["subject"].unique(), key="todo_sub_sel")
+                    todo_sub = st.selectbox("対象科目", all_subjects, key="todo_sub_sel")
                 with c_tunit:
-                    todo_units = problems_df[problems_df["subject"] == todo_sub]["unit"].unique()
-                    todo_unit = st.selectbox("対象単元", todo_units, key="todo_unit_sel")
+                    available_units = []
+                    if not problems_df.empty:
+                        sub_units = problems_df[problems_df["subject"] == todo_sub]["unit"].unique()
+                        available_units = [str(u).strip() for u in sub_units if str(u).strip() and str(u).lower() not in ["nan", "none"]]
+
+                    unit_options = ["（指定なし）"] + sorted(list(set(available_units)))
+                    todo_unit = st.selectbox("対象単元（任意）", unit_options, key="todo_unit_sel")
 
                 selected_p_id_for_todo = ""
                 if target_scope == "特定の問題を指定":
-                    cand_probs = problems_df[(problems_df["subject"] == todo_sub) & (problems_df["unit"] == todo_unit)]
-                    prob_choices = {
-                        f"[{row['problem_id']}] {row['title']}": row['problem_id']
-                        for _, row in cand_probs.iterrows()
-                    }
-                    if prob_choices:
-                        sel_p_label = st.selectbox("対象問題", list(prob_choices.keys()), key="todo_prob_sel")
-                        selected_p_id_for_todo = prob_choices[sel_p_label]
+                    if problems_df.empty:
+                        st.caption("登録された問題がありません。")
                     else:
-                        st.caption("この単元には登録された問題がありません。")
+                        if todo_unit != "（指定なし）":
+                            cand_probs = problems_df[(problems_df["subject"] == todo_sub) & (problems_df["unit"] == todo_unit)]
+                        else:
+                            cand_probs = problems_df[problems_df["subject"] == todo_sub]
+
+                        prob_choices = {
+                            f"[{row['problem_id']}] {row['title']}": row['problem_id']
+                            for _, row in cand_probs.iterrows()
+                        }
+                        if prob_choices:
+                            sel_p_label = st.selectbox("対象問題", list(prob_choices.keys()), key="todo_prob_sel")
+                            selected_p_id_for_todo = prob_choices[sel_p_label]
+                        else:
+                            st.caption("対象となる問題がありません。")
 
                 col_tdue, _ = st.columns([1, 1])
                 with col_tdue:
@@ -1628,11 +1640,13 @@ if load_success:
                             exist_t_ids = pd.to_numeric(todos_df["todo_id"], errors="coerce").dropna()
                             next_todo_id = int(exist_t_ids.max() + 1) if not exist_t_ids.empty else 1
 
+                        save_unit_val = "" if todo_unit == "（指定なし）" else todo_unit.strip()
+
                         new_todo_row = pd.DataFrame([{
                             "todo_id": next_todo_id,
                             "problem_id": selected_p_id_for_todo,
                             "subject": todo_sub,
-                            "unit": todo_unit,
+                            "unit": save_unit_val,
                             "task_desc": target_desc.strip(),
                             "due_date": target_due.strftime("%Y-%m-%d"),
                             "status": "open",
@@ -1645,6 +1659,7 @@ if load_success:
                         st.rerun()
                     else:
                         st.warning("タスク内容を入力してください。")
+
 
         st.write("---")
 
@@ -1698,7 +1713,8 @@ if load_success:
                     else:
                         due_badge = f'<span class="badge-due-safe">📅 残り {diff_days}日 ({due_str})</span>'
 
-                    scope_label = f"📁 {sub_s} / {unit_s}"
+                    unit_clean = unit_s if (unit_s and unit_s.lower() not in ["nan", "none", "（指定なし）"]) else ""
+                    scope_label = f"📁 {sub_s}" + (f" / {unit_clean}" if unit_clean else "")
                     if p_title_str:
                         scope_label += f" → 📄 {p_title_str}"
 
